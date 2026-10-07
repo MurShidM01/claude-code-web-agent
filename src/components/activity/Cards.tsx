@@ -1,16 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { Check, ChevronRight, Copy, ExternalLink, RotateCcw, Send } from "lucide-react";
 import type { DiffBlock, PlanBlock, QuestionBlock, ToolBlock } from "@/lib/events/reducer";
 import { languageFromPath } from "@/lib/workspace/path";
 
 export function ToolCard({ block }: { block: ToolBlock }) {
   const [open, setOpen] = useState(block.name === "Bash" || block.status === "running" || block.status === "error");
+  const [copied, setCopied] = useState(false);
   const command = block.command;
   const badge = statusBadge(block.status);
   return (
     <article className="card">
       <button type="button" className="card-head" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <ChevronRight size={14} className={`chev ${open ? "open" : ""}`} aria-hidden />
         <span className={`badge ${badge.tone}`}>{badge.label}</span>
         <span className="name">{block.name}</span>
         <span className="summary">{block.summary}</span>
@@ -25,11 +28,17 @@ export function ToolCard({ block }: { block: ToolBlock }) {
                 {block.exitCode != null ? <span className="meta">exit {block.exitCode}</span> : null}
                 <button
                   type="button"
-                  className="icon-btn"
+                  className="icon-btn ghost"
                   aria-label="Copy command"
-                  onClick={() => void navigator.clipboard.writeText(command)}
+                  title="Copy command"
+                  onClick={() =>
+                    void navigator.clipboard.writeText(command).then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1200);
+                    })
+                  }
                 >
-                  Copy
+                  {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
                 </button>
               </div>
               <div className="terminal">{command}</div>
@@ -62,6 +71,7 @@ export function DiffCard({
   return (
     <article className="card">
       <button type="button" className="card-head" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <ChevronRight size={14} className={`chev ${open ? "open" : ""}`} aria-hidden />
         <span className="badge ok">{block.diff.created ? "new" : block.diff.deleted ? "deleted" : "edit"}</span>
         <span className="name">{block.diff.path}</span>
         <span className="summary">
@@ -78,10 +88,18 @@ export function DiffCard({
             ))}
           </div>
           <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => onOpen(block.diff.path)}>
+            <button type="button" className="btn" onClick={() => onOpen(block.diff.path)} title="Open file in the file panel">
+              <ExternalLink size={14} aria-hidden />
               Open file
             </button>
-            <button type="button" className="btn" onClick={() => onRevert(block.diff.path, block.diff.original)} disabled={block.diff.original == null}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => onRevert(block.diff.path, block.diff.original)}
+              disabled={block.diff.original == null}
+              title="Restore the file to its state before this change"
+            >
+              <RotateCcw size={14} aria-hidden />
               Revert change
             </button>
           </div>
@@ -152,6 +170,7 @@ export function QuestionCard({
         ))}
         <div className="dialog-actions">
           <button type="button" className="btn primary" disabled={Boolean(block.answers)} onClick={() => onAnswer(block.questionId, answers)}>
+            <Send size={14} aria-hidden />
             {block.answers ? "Answered" : "Send answers"}
           </button>
         </div>

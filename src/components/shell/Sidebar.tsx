@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, Moon, Plus, Settings, Sun } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, FolderOpen, LogIn, LogOut, MessageSquare, Moon, Plus, Settings, Sun, Trash2, X } from "lucide-react";
 import { Menu } from "@/components/ui/Menu";
 import { PERMISSION_MODE_LABEL, type PermissionMode } from "@/lib/permissions/types";
 import type { AppState } from "@/lib/app/controller";
@@ -10,6 +10,7 @@ export function Sidebar({
   onNew,
   onSelect,
   onDelete,
+  onClose,
   mode,
   onMode,
   onTheme,
@@ -23,6 +24,7 @@ export function Sidebar({
   onNew: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onClose: () => void;
   mode: PermissionMode;
   onMode: (mode: PermissionMode) => void;
   onTheme: (theme: "light" | "dark" | "system") => void;
@@ -49,12 +51,15 @@ export function Sidebar({
             <path d="M4.5 12h7" stroke="#E7A27C" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </div>
-        <div>
+        <div className="brand-text">
           <h1>Kiln</h1>
           <p>Coding agent</p>
         </div>
+        <button type="button" className="icon-btn ghost mobile-close" aria-label="Close sidebar" onClick={onClose}>
+          <X size={18} aria-hidden />
+        </button>
       </div>
-      <div style={{ padding: "4px 12px 8px" }}>
+      <div className="side-actions">
         <button type="button" className="quiet-btn" onClick={onNew}>
           <Plus size={16} aria-hidden />
           New conversation
@@ -64,28 +69,40 @@ export function Sidebar({
         <div className="section-label">Recent</div>
         {state.conversations.length === 0 ? <div className="meta" style={{ padding: "0 10px" }}>No conversations yet.</div> : null}
         {state.conversations.map((conversation) => (
-          <div key={conversation.id} style={{ display: "flex" }}>
+          <div key={conversation.id} className="side-row">
             <button
               type="button"
               className={`side-link ${conversation.id === state.activeId ? "active" : ""}`}
               onClick={() => onSelect(conversation.id)}
             >
+              <MessageSquare size={15} aria-hidden />
               <span>{conversation.title}</span>
             </button>
-            <button type="button" className="icon-btn" aria-label={`Delete ${conversation.title}`} onClick={() => onDelete(conversation.id)}>
-              ×
+            <button
+              type="button"
+              className="icon-btn ghost row-delete"
+              aria-label={`Delete ${conversation.title}`}
+              title={`Delete ${conversation.title}`}
+              onClick={() => onDelete(conversation.id)}
+            >
+              <Trash2 size={14} aria-hidden />
             </button>
           </div>
         ))}
       </div>
       <div className="side-footer">
-        <button type="button" className="quiet-btn" onClick={onConnect}>
+        <button type="button" className="quiet-btn" onClick={onConnect} title="Connect a workspace">
           <FolderOpen size={16} aria-hidden />
           <span className={`dot ${state.bridge.status === "connected" ? "ok" : state.workspace.kind === "fsa" ? "warn" : "bad"}`} />
-          {bridgeLabel}
+          <span className="truncate" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{bridgeLabel}</span>
         </button>
         <Menu
-          label={<>Mode · <strong>{PERMISSION_MODE_LABEL[mode]}</strong></>}
+          label={
+            <>
+              Mode · <strong>{PERMISSION_MODE_LABEL[mode]}</strong>
+              <ChevronDown size={13} className="chev" aria-hidden />
+            </>
+          }
           value={mode}
           options={[
             { id: "ask", label: "Ask Every Time", description: "Approve every mutating or privileged action" },
@@ -95,7 +112,13 @@ export function Sidebar({
           onChange={(id) => onMode(id as PermissionMode)}
         />
         <Menu
-          label={<>{state.settings.theme === "dark" ? <Moon size={14} aria-hidden /> : <Sun size={14} aria-hidden />} Theme · <strong>{state.settings.theme}</strong></>}
+          label={
+            <>
+              {state.settings.theme === "dark" ? <Moon size={14} aria-hidden /> : <Sun size={14} aria-hidden />}
+              Theme · <strong>{state.settings.theme}</strong>
+              <ChevronDown size={13} className="chev" aria-hidden />
+            </>
+          }
           value={state.settings.theme}
           options={[
             { id: "light", label: "Light" },
@@ -111,11 +134,18 @@ export function Sidebar({
         {state.auth.status === "signed-in" ? (
           <>
             <div className="status-row">Signed in as {state.auth.user?.username ?? "Puter user"}</div>
-            <button type="button" className="quiet-btn" onClick={onSwitch}>Switch account</button>
-            <button type="button" className="quiet-btn" onClick={onSignOut}>Sign out</button>
+            <button type="button" className="quiet-btn" onClick={onSwitch}>
+              <ArrowLeftRight size={15} aria-hidden />
+              Switch account
+            </button>
+            <button type="button" className="quiet-btn" onClick={onSignOut}>
+              <LogOut size={15} aria-hidden />
+              Sign out
+            </button>
           </>
         ) : (
           <button type="button" className="quiet-btn" onClick={onSignIn} disabled={state.auth.status === "signing-in"}>
+            <LogIn size={15} aria-hidden />
             {state.auth.status === "signing-in" ? "Waiting for Puter…" : state.auth.status === "checking" ? "Checking session…" : "Sign in with Puter"}
           </button>
         )}
@@ -123,4 +153,3 @@ export function Sidebar({
     </aside>
   );
 }
-

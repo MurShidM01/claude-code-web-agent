@@ -152,9 +152,11 @@ export class AppController {
       });
     }
     const active = saved[0];
+    const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 960px)").matches;
     this.set({
       booted: true,
       settings,
+      sidebarOpen: isMobile ? false : this.snapshot.sidebarOpen,
       conversations: summaries(this.conversations),
       activeId: active?.id ?? null,
       fsaSupported: fileSystemAccessSupported(),

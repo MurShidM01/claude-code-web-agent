@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ArrowUp, Paperclip, PencilLine, ShieldQuestion, Square, X, Zap } from "lucide-react";
 import { ModelPicker } from "@/components/model/ModelPicker";
 import { Menu } from "@/components/ui/Menu";
 import type { AppController, AppState } from "@/lib/app/controller";
 import { PERMISSION_MODE_LABEL, type PermissionMode } from "@/lib/permissions/types";
+
+const MODE_ICON: Record<PermissionMode, typeof ShieldQuestion> = {
+  ask: ShieldQuestion,
+  "auto-edit": PencilLine,
+  full: Zap,
+};
 
 export function Composer({
   state,
@@ -20,6 +27,7 @@ export function Composer({
   const [text, setText] = useState("");
   const [files, setFiles] = useState<{ name: string; mediaType: string; text?: string; dataUrl?: string }[]>([]);
   const box = useRef<HTMLTextAreaElement>(null);
+  const ModeIcon = MODE_ICON[permissionMode];
 
   useEffect(() => {
     const fill = (event: Event) => {
@@ -69,7 +77,6 @@ export function Composer({
           <label className="hint" htmlFor="composer">
             {state.workspace.label ? state.workspace.label : "No project"} · {PERMISSION_MODE_LABEL[permissionMode]}
           </label>
-          {files.length ? <div className="hint">{files.map((file) => file.name).join(", ")}</div> : null}
           <textarea
             id="composer"
             ref={box}
@@ -84,6 +91,23 @@ export function Composer({
               }
             }}
           />
+          {files.length ? (
+            <div className="attach-list">
+              {files.map((file, index) => (
+                <span key={`${file.name}-${index}`} className="attach-chip" title={file.name}>
+                  <Paperclip size={12} aria-hidden />
+                  <span>{file.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => setFiles((current) => current.filter((_, item) => item !== index))}
+                  >
+                    <X size={12} aria-hidden />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="composer-bar">
             <ModelPicker
               state={state}
@@ -95,7 +119,12 @@ export function Composer({
               onRefresh={() => void controller.refreshModels()}
             />
             <Menu
-              label={<strong>{PERMISSION_MODE_LABEL[permissionMode]}</strong>}
+              label={
+                <>
+                  <ModeIcon size={14} aria-hidden />
+                  <span className="chip-label hide-sm">{PERMISSION_MODE_LABEL[permissionMode]}</span>
+                </>
+              }
               value={permissionMode}
               options={[
                 { id: "ask", label: "Ask Every Time" },
@@ -104,8 +133,8 @@ export function Composer({
               ]}
               onChange={(id) => controller.setPermissionMode(id as PermissionMode)}
             />
-            <label className="chip" style={{ cursor: "pointer" }}>
-              Attach
+            <label className="icon-btn" style={{ cursor: "pointer" }} title="Attach files" aria-label="Attach files">
+              <Paperclip size={16} aria-hidden />
               <input
                 type="file"
                 hidden
@@ -117,12 +146,12 @@ export function Composer({
               />
             </label>
             {state.running ? (
-              <button type="button" className="send-btn" onClick={() => controller.cancel()}>
-                Stop
+              <button type="button" className="send-btn stop" onClick={() => controller.cancel()} aria-label="Stop" title="Stop (Esc)">
+                <Square size={15} aria-hidden fill="currentColor" />
               </button>
             ) : (
-              <button type="submit" className="send-btn" disabled={!text.trim() && !files.length} aria-label="Send">
-                Send
+              <button type="submit" className="send-btn" disabled={!text.trim() && !files.length} aria-label="Send" title="Send (Enter)">
+                <ArrowUp size={18} aria-hidden strokeWidth={2.4} />
               </button>
             )}
           </div>
