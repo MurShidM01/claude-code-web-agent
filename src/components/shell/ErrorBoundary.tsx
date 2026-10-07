@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ReactNode } from "react";
+import { AlertDialog } from "@/components/ui/AlertDialog";
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -10,17 +11,24 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   }
 
   render() {
-    if (!this.state.error) return this.props.children;
     return (
-      <div className="dialog" role="alert" style={{ margin: 24 }}>
-        <h3>Something in the interface failed</h3>
-        <p>{this.state.error.message}</p>
-        <div className="dialog-actions">
-          <button className="btn primary" onClick={() => this.setState({ error: null })}>
-            Try again
-          </button>
-        </div>
-      </div>
+      <>
+        {this.state.error ? (
+          <AlertDialog
+            open
+            title="Something in the interface failed"
+            message={this.state.error.message}
+            tone="danger"
+            onClose={() => this.setState({ error: null })}
+            actions={
+              <button type="button" className="btn primary" data-autofocus onClick={() => this.setState({ error: null })}>
+                Try again
+              </button>
+            }
+          />
+        ) : null}
+        {this.props.children}
+      </>
     );
   }
 }

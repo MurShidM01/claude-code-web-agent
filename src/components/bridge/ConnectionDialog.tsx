@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowRight, Folder, FolderInput, FolderOpen, Link2, Plug, RefreshCw, Terminal, X } from "lucide-react";
+import { confirmed } from "@/components/ui/AlertDialog";
 import { Dialog } from "@/components/ui/Dialog";
 import type { AppController, AppState } from "@/lib/app/controller";
 
@@ -41,7 +42,14 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
                 className="icon-btn ghost"
                 aria-label="Close project"
                 title="Close project"
-                onClick={() => controller.closeWorkspace()}
+                onClick={() => {
+                  void confirmed(controller, {
+                    title: "Close this project?",
+                    message: `${state.workspace.label ?? "The folder"} will be disconnected. Chat stays; file and command tools stop until you import a project again.`,
+                    confirmLabel: "Close project",
+                    tone: "danger",
+                  }, () => controller.closeWorkspace());
+                }}
               >
                 <X size={15} aria-hidden />
               </button>
@@ -64,7 +72,14 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
                   className={`ws-row${isCurrent ? " active" : ""}`}
                   disabled={isCurrent || needsBridge}
                   title={needsBridge ? "The local bridge is offline, so this path cannot be opened" : workspace.root ?? workspace.label}
-                  onClick={() => void controller.openWorkspace(workspace.id)}
+                  onClick={() => {
+                    void confirmed(controller, {
+                      title: "Import this project?",
+                      message: `${workspace.label} will become the folder Kiln reads, edits, and runs commands in.`,
+                      confirmLabel: "Import",
+                      tone: "info",
+                    }, () => controller.openWorkspace(workspace.id));
+                  }}
                 >
                   <span className="ws-icon">
                     {workspace.kind === "fsa" ? <Folder size={16} aria-hidden /> : <Terminal size={16} aria-hidden />}
@@ -88,7 +103,19 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
       <div className="dialog-section">
         <div className="section-label">Open something else</div>
         <div style={{ display: "grid", gap: 8 }}>
-          <button type="button" className="btn primary block" onClick={() => void controller.pickFolder()} disabled={!state.fsaSupported}>
+          <button
+            type="button"
+            className="btn primary block"
+            disabled={!state.fsaSupported}
+            onClick={() => {
+              void confirmed(controller, {
+                title: "Import a folder?",
+                message: "The browser will ask you to choose a folder. Kiln can read and edit files there. Shell and git still need the local bridge.",
+                confirmLabel: "Choose folder",
+                tone: "info",
+              }, () => controller.pickFolder());
+            }}
+          >
             <FolderInput size={16} aria-hidden />
             {state.fsaSupported ? "Choose a folder on this computer" : "Folder picker needs a Chromium browser"}
           </button>
@@ -119,7 +146,14 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
           <button
             type="button"
             className="btn primary"
-            onClick={() => void controller.selectBridgeWorkspace(root)}
+            onClick={() => {
+              void confirmed(controller, {
+                title: "Import this path?",
+                message: `${root.trim()} will be opened through the local bridge, with shell and git access.`,
+                confirmLabel: "Import",
+                tone: "info",
+              }, () => controller.selectBridgeWorkspace(root));
+            }}
             disabled={!root.trim() || !bridgeUp}
           >
             <FolderOpen size={15} aria-hidden />

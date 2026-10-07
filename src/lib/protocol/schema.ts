@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const bridgeMethods = [
   "readFile",
+  "readBinary",
   "writeFile",
   "deleteFile",
   "renamePath",
@@ -23,6 +24,11 @@ export const readFileParams = z.object({
   path: z.string().min(1),
   offset: z.number().int().positive().optional(),
   limit: z.number().int().positive().max(5000).optional(),
+});
+
+export const readBinaryParams = z.object({
+  path: z.string().min(1),
+  maxBytes: z.number().int().positive().max(8_000_000).optional(),
 });
 
 export const writeFileParams = z.object({
@@ -95,6 +101,7 @@ export type RpcRequest = z.infer<typeof rpcRequest>;
 
 export const paramSchema: Record<BridgeMethod, z.ZodTypeAny> = {
   readFile: readFileParams,
+  readBinary: readBinaryParams,
   writeFile: writeFileParams,
   deleteFile: deleteFileParams,
   renamePath: renamePathParams,

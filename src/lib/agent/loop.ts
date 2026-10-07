@@ -41,6 +41,9 @@ export interface AgentLoopOptions {
   history: ModelMessage[];
   userText: string;
   images?: { mediaType: string; dataUrl: string }[];
+  stream?: boolean;
+  reasoning?: boolean;
+  reasoningEffort?: string;
   toolAllowlist?: string[];
   depth?: number;
   readState?: Map<string, string>;
@@ -73,6 +76,8 @@ class PermissionDenied extends Error {
 export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoopResult> {
   const depth = options.depth ?? 0;
   const readState = options.readState ?? new Map<string, string>();
+  const turnImages = [...(options.images ?? [])];
+  const looping = { ...options, images: turnImages };
   const gate = new PermissionGate();
   const messages: ModelMessage[] = [
     { role: "system", content: options.systemPrompt },
@@ -115,7 +120,7 @@ export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoop
     const compacted = compactMessages(messages, 120_000);
     let streamed: Collected;
     try {
-      streamed = await streamWithRetry(options, compacted);
+      streamed = await streamWithRetry(looping, compacted);
     } catch (error) {
       if (options.signal.aborted) {
         cancelled = true;
@@ -290,6 +295,8 @@ export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoop
       try {
         const result = await tool.execute(asRecord(call.input), toolCtx);
         publishResult(options, call.id, call.name, result, stdout, stderr);
+        const seen = takeVision(result.output);
+        if (seen && turnImages.length < 6) turnImages.push(seen);
         if (result.ok) recordSuccess();
         else recordFailure(signature);
         if (call.name === "TodoWrite" && isTodoOutput(result.output)) {
@@ -501,11 +508,28 @@ function publishResult(
   void stderr;
 }
 
+function takeVision(output: unknown): { mediaType: string; dataUrl: string } | null {
+  if (!output || typeof output !== "object") return null;
+  const vision = (output as { vision?: { mediaType?: string; dataUrl?: string } }).vision;
+  if (!vision?.dataUrl || !vision.mediaType) return null;
+  return { mediaType: vision.mediaType, dataUrl: vision.dataUrl };
+}
+
+function stripVision(output: unknown): unknown {
+  if (!output || typeof output !== "object") return output;
+  const record = { ...(output as Record<string, unknown>) };
+  if (record.vision && typeof record.vision === "object") {
+    const vision = record.vision as { mediaType?: string };
+    record.vision = { attached: true, mediaType: vision.mediaType };
+  }
+  return record;
+}
+
 function payloadForModel(result: ToolResult): string {
   const body = {
     ok: result.ok,
     isError: result.isError ?? !result.ok,
-    output: result.output,
+    output: stripVision(result.output),
     truncated: result.truncated,
     exitCode: result.exitCode,
     diff: result.diff
@@ -606,6 +630,9 @@ async function collect(options: AgentLoopOptions, messages: ModelMessage[], emit
     maxTokens: options.maxTokens,
     signal: options.signal,
     images: options.images,
+    stream: options.stream,
+    reasoning: options.reasoning,
+    reasoningEffort: options.reasoningEffort,
   });
   for await (const event of stream) {
     if (options.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -616,6 +643,9 @@ async function collect(options: AgentLoopOptions, messages: ModelMessage[], emit
           emitted = true;
           options.emit({ type: "assistant_text_delta", id: createId("delta"), messageId, delta });
         }
+      },
+      onReasoning(delta) {
+        if (emitDeltas && delta) options.emit({ type: "assistant_reasoning_delta", messageId, delta });
       },
       onTool(call) {
         toolCalls.push(call);
@@ -633,11 +663,13 @@ export function applyStreamEvent(
   event: ModelStreamEvent,
   handlers: {
     onText: (delta: string) => void;
+    onReasoning?: (delta: string) => void;
     onTool: (call: { id: string; name: string; input: unknown }) => void;
     onError: (error: ModelError) => void;
   },
 ) {
   if (event.type === "text" && event.text) handlers.onText(event.text);
+  if (event.type === "reasoning" && event.text) handlers.onReasoning?.(event.text);
   if (event.type === "tool_use") {
     handlers.onTool({ id: event.id || createId("tool"), name: event.name, input: event.input ?? {} });
   }

@@ -1,9 +1,26 @@
 "use client";
 
+import {
+  AudioLines,
+  Cable,
+  Keyboard,
+  KeyRound,
+  Palette,
+  ScrollText,
+  Shield,
+  ShieldAlert,
+  Sun,
+  Moon,
+  Monitor,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
+import { ModelToolsPanel } from "@/components/settings/ModelToolsPanel";
+import { ProviderPanel } from "@/components/settings/ProviderPanel";
 import type { AppController, AppState } from "@/lib/app/controller";
 import type { PermissionMode } from "@/lib/permissions/types";
-import type { ThemePreference } from "@/lib/persistence/settings";
+import type { SettingsTab, ThemePreference } from "@/lib/persistence/settings";
 
 const SHORTCUTS: [string, string][] = [
   ["Enter", "Send the message"],
@@ -17,167 +34,191 @@ const SHORTCUTS: [string, string][] = [
   ["⌘/Ctrl + ,", "Settings"],
 ];
 
+const NAV: { id: SettingsTab; label: string; icon: LucideIcon }[] = [
+  { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "providers", label: "Providers", icon: KeyRound },
+  { id: "models", label: "Models & tools", icon: AudioLines },
+  { id: "permissions", label: "Permissions", icon: Shield },
+  { id: "bridge", label: "Bridge", icon: Cable },
+  { id: "safety", label: "Safety", icon: ShieldAlert },
+  { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
+  { id: "diagnostics", label: "Diagnostics", icon: ScrollText },
+];
+
+const THEMES: { id: ThemePreference; label: string; icon: LucideIcon }[] = [
+  { id: "light", label: "Light", icon: Sun },
+  { id: "dark", label: "Dark", icon: Moon },
+  { id: "system", label: "System", icon: Monitor },
+];
+
 export function SettingsDialog({ state, controller }: { state: AppState; controller: AppController }) {
-  const settings = state.settings;
+  const tab = state.settingsTab;
   return (
-    <Dialog open={state.settingsOpen} title="Settings" onClose={() => controller.setSettingsOpen(false)}>
-      <p className="dialog-sub">Preferences are stored in this browser. Model calls still go through your Puter account.</p>
-
-      <div className="dialog-section">
-        <div className="section-label">Appearance</div>
-        <div className="seg">
-          {(["light", "dark", "system"] as ThemePreference[]).map((theme) => (
-            <button key={theme} type="button" className="chip" aria-pressed={settings.theme === theme} onClick={() => controller.setTheme(theme)}>
-              {theme}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="dialog-section">
-        <div className="section-label">Default permission mode</div>
-        <div className="seg">
-          {([
-            ["ask", "Ask Every Time"],
-            ["auto-edit", "Auto-Edit Only"],
-            ["full", "Full Access"],
-          ] as [PermissionMode, string][]).map(([mode, label]) => (
-            <button
-              key={mode}
-              type="button"
-              className="chip"
-              aria-pressed={settings.defaultPermissionMode === mode}
-              onClick={() => controller.updateSettings({ defaultPermissionMode: mode })}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <p className="meta" style={{ margin: "8px 0 0" }}>
-          Applied to new conversations. The mode is enforced in the tool layer before a tool runs, not in the buttons.
-        </p>
-      </div>
-
-      <div className="dialog-section">
-        <div className="section-label">Model defaults</div>
-        <div style={{ display: "grid", gap: 10 }}>
-          <label className="field" style={{ margin: 0 }}>
-            <span>Temperature override</span>
-            <input
-              type="number"
-              min={0}
-              max={2}
-              step={0.1}
-              value={settings.temperature ?? ""}
-              placeholder="Model default"
-              onChange={(event) => controller.updateSettings({ temperature: event.target.value === "" ? null : Number(event.target.value) })}
-            />
-          </label>
-          <label className="field" style={{ margin: 0 }}>
-            <span>Max output tokens</span>
-            <input
-              type="number"
-              min={1}
-              value={settings.maxTokens ?? ""}
-              placeholder="Model default"
-              onChange={(event) => controller.updateSettings({ maxTokens: event.target.value === "" ? null : Number(event.target.value) })}
-            />
-          </label>
-          <label className="field" style={{ margin: 0 }}>
-            <span>Max tool rounds per turn</span>
-            <input
-              type="number"
-              min={1}
-              max={48}
-              value={settings.maxIterations}
-              onChange={(event) => controller.updateSettings({ maxIterations: Number(event.target.value) || 24 })}
-            />
-          </label>
-        </div>
-      </div>
-
-      <div className="dialog-section">
-        <div className="section-label">Local bridge</div>
-        <div style={{ display: "grid", gap: 10 }}>
-          <label className="field" style={{ margin: 0 }}>
-            <span>Host</span>
-            <input value={settings.bridgeHost} spellCheck={false} onChange={(event) => controller.updateSettings({ bridgeHost: event.target.value })} />
-          </label>
-          <label className="field" style={{ margin: 0 }}>
-            <span>Port</span>
-            <input
-              type="number"
-              value={settings.bridgePort}
-              onChange={(event) => controller.updateSettings({ bridgePort: Number(event.target.value) || 3939 })}
-            />
-          </label>
-        </div>
-        <p className="meta" style={{ margin: "8px 0 0" }}>
-          Used when you pair a bridge on another machine. Local mode reads <code>.kiln/bridge.json</code> instead.
-        </p>
-      </div>
-
-      <div className="dialog-section">
-        <div className="section-label">Command safety</div>
-        <label className="field" style={{ margin: 0 }}>
-          <span>Extra deny patterns — one regex or substring per line</span>
-          <textarea
-            rows={3}
-            value={settings.extraDenyPatterns.join("\n")}
-            placeholder={"rm -rf /\ngit push --force"}
-            onChange={(event) =>
-              controller.updateSettings({
-                extraDenyPatterns: event.target.value
-                  .split("\n")
-                  .map((line) => line.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
-        </label>
-      </div>
-
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={settings.persistenceEnabled}
-          onChange={(event) => controller.updateSettings({ persistenceEnabled: event.target.checked })}
-        />
-        <span>Keep conversations in this browser (IndexedDB)</span>
-      </label>
-
-      <div className="dialog-section">
-        <div className="section-label">Shortcuts</div>
-        <div className="kv" style={{ margin: 0 }}>
-          {SHORTCUTS.map(([keys, action]) => (
-            <div key={keys} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <kbd style={{ flex: "none", minWidth: 118, textAlign: "center" }}>{keys}</kbd>
-              <span className="meta">{action}</span>
+    <Dialog open={state.settingsOpen} title="Settings" layout="settings" onClose={() => controller.setSettingsOpen(false)}>
+      <div className="settings-shell">
+        <nav className="settings-nav" aria-label="Settings sections">
+          <div className="settings-brand">
+            <div>
+              <strong>Settings</strong>
+              <span>Stored in this browser</span>
             </div>
-          ))}
+            <button type="button" className="icon-btn ghost" aria-label="Close settings" onClick={() => controller.setSettingsOpen(false)}>
+              <X size={16} aria-hidden />
+            </button>
+          </div>
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button key={item.id} type="button" className="settings-link" aria-current={tab === item.id ? "page" : undefined} onClick={() => controller.setSettingsTab(item.id)}>
+                <Icon size={16} aria-hidden />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="settings-main">
+          {tab === "appearance" ? <Appearance state={state} controller={controller} /> : null}
+          {tab === "providers" ? <ProviderPanel state={state} controller={controller} /> : null}
+          {tab === "models" ? <ModelToolsPanel state={state} controller={controller} /> : null}
+          {tab === "permissions" ? <Permissions state={state} controller={controller} /> : null}
+          {tab === "bridge" ? <Bridge state={state} controller={controller} /> : null}
+          {tab === "safety" ? <Safety state={state} controller={controller} /> : null}
+          {tab === "shortcuts" ? <Shortcuts /> : null}
+          {tab === "diagnostics" ? <Diagnostics state={state} /> : null}
+          <div className="dialog-actions">
+            <button type="button" className="btn primary" onClick={() => controller.setSettingsOpen(false)}>Done</button>
+          </div>
         </div>
-      </div>
-
-      <div className="dialog-section">
-        <div className="section-label">Recent log</div>
-        <div className="terminal" style={{ maxHeight: 140 }}>
-          {state.logs.length
-            ? state.logs
-                .slice(-8)
-                .map((entry) => `${entry.level}: ${entry.message}`)
-                .join("\n")
-            : "Nothing logged yet."}
-        </div>
-        <p className="meta" style={{ margin: "8px 0 0" }}>
-          Kiln does not send file contents or tokens to this log.
-        </p>
-      </div>
-
-      <div className="dialog-actions">
-        <button type="button" className="btn primary" onClick={() => controller.setSettingsOpen(false)}>
-          Done
-        </button>
       </div>
     </Dialog>
+  );
+}
+
+function Appearance({ state, controller }: { state: AppState; controller: AppController }) {
+  return (
+    <div className="settings-stack">
+      <header className="settings-head">
+        <h3>Appearance</h3>
+        <p>The canvas follows the theme. System tracks the operating system.</p>
+      </header>
+      <div className="theme-grid">
+        {THEMES.map((theme) => {
+          const Icon = theme.icon;
+          return (
+            <button key={theme.id} type="button" className="theme-card" aria-pressed={state.settings.theme === theme.id} onClick={() => controller.setTheme(theme.id)}>
+              <Icon size={18} aria-hidden />
+              <strong>{theme.label}</strong>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Permissions({ state, controller }: { state: AppState; controller: AppController }) {
+  const modes: [PermissionMode, string, string][] = [
+    ["ask", "Ask every time", "Approval before mutating or privileged tools"],
+    ["auto-edit", "Auto-edit only", "File edits proceed. Shell and network still ask"],
+    ["full", "Full access", "The loop continues. Dangerous commands still ask"],
+  ];
+  return (
+    <div className="settings-stack">
+      <header className="settings-head">
+        <h3>Permissions</h3>
+        <p>Applied to new conversations. Enforcement happens in the tool layer, before a tool runs.</p>
+      </header>
+      <div className="choice-list">
+        {modes.map(([mode, label, detail]) => (
+          <button key={mode} type="button" className="choice" aria-pressed={state.settings.defaultPermissionMode === mode} onClick={() => controller.updateSettings({ defaultPermissionMode: mode })}>
+            <strong>{label}</strong>
+            <span>{detail}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Bridge({ state, controller }: { state: AppState; controller: AppController }) {
+  return (
+    <div className="settings-stack">
+      <header className="settings-head">
+        <h3>Local bridge</h3>
+        <p>Used when you pair a bridge on another machine. Local mode reads <code>.kiln/bridge.json</code> instead. Provider sign-in also uses the bridge so tokens stay on this computer.</p>
+      </header>
+      <div className="twin">
+        <label className="field">
+          <span>Host</span>
+          <input value={state.settings.bridgeHost} spellCheck={false} onChange={(event) => controller.updateSettings({ bridgeHost: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Port</span>
+          <input type="number" value={state.settings.bridgePort} onChange={(event) => controller.updateSettings({ bridgePort: Number(event.target.value) || 3939 })} />
+        </label>
+      </div>
+      <p className="meta">Bridge is {state.bridge.status}{state.bridge.transport !== "none" ? ` · ${state.bridge.transport}` : ""}.</p>
+    </div>
+  );
+}
+
+function Safety({ state, controller }: { state: AppState; controller: AppController }) {
+  return (
+    <div className="settings-stack">
+      <header className="settings-head">
+        <h3>Command safety</h3>
+        <p>Extra deny patterns are checked before a command is spawned. One regex or substring per line.</p>
+      </header>
+      <label className="field">
+        <span>Deny patterns</span>
+        <textarea
+          rows={5}
+          value={state.settings.extraDenyPatterns.join("\n")}
+          placeholder={"rm -rf /\ngit push --force"}
+          onChange={(event) =>
+            controller.updateSettings({
+              extraDenyPatterns: event.target.value.split("\n").map((line) => line.trim()).filter(Boolean),
+            })
+          }
+        />
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={state.settings.persistenceEnabled} onChange={(event) => controller.updateSettings({ persistenceEnabled: event.target.checked })} />
+        <span>Keep conversations in this browser (IndexedDB)</span>
+      </label>
+    </div>
+  );
+}
+
+function Shortcuts() {
+  return (
+    <div className="settings-stack">
+      <header className="settings-head">
+        <h3>Shortcuts</h3>
+        <p>Reasoning, streaming, vision, and tools also have icons in the composer.</p>
+      </header>
+      <div className="shortcut-list">
+        {SHORTCUTS.map(([keys, action]) => (
+          <div key={keys}>
+            <kbd>{keys}</kbd>
+            <span>{action}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Diagnostics({ state }: { state: AppState }) {
+  return (
+    <div className="settings-stack">
+      <header className="settings-head">
+        <h3>Diagnostics</h3>
+        <p>Recent local log lines. File contents and tokens are not written here.</p>
+      </header>
+      <div className="terminal">
+        {state.logs.length ? state.logs.slice(-12).map((entry) => `${entry.level}: ${entry.message}`).join("\n") : "Nothing logged yet."}
+      </div>
+    </div>
   );
 }

@@ -12,6 +12,9 @@ export function classifyTool(name: string, raw: unknown): Operation {
 
   switch (name) {
     case "Read":
+    case "ReadMany":
+    case "ImageRead":
+    case "MemoryRead":
     case "LS":
     case "Glob":
     case "Grep":
@@ -34,12 +37,14 @@ export function classifyTool(name: string, raw: unknown): Operation {
     case "Edit":
     case "MultiEdit":
     case "NotebookEdit":
+    case "MemoryWrite":
+    case "Mkdir":
       return op({
         tool: name,
-        risk: "edit",
+        risk: name === "Mkdir" ? "structure" : "edit",
         summary: summaryFor(name, input),
         why: whyFor(name, input),
-        paths: [pathOf("file_path") || pathOf("notebook_path")].filter(Boolean),
+        paths: [pathOf("file_path") || pathOf("notebook_path") || pathOf("path") || (name === "MemoryWrite" ? ".kiln/MEMORY.md" : "")].filter(Boolean),
       });
     case "Delete": {
       const recursive = input.recursive === true;
@@ -122,7 +127,16 @@ function summaryFor(name: string, input: Record<string, unknown>): string {
   const file = typeof input.file_path === "string" ? input.file_path : typeof input.path === "string" ? input.path : "";
   switch (name) {
     case "Read":
+    case "ImageRead":
       return `Read ${file}`;
+    case "ReadMany":
+      return "Read several files";
+    case "MemoryRead":
+      return "Read project memory";
+    case "MemoryWrite":
+      return "Update project memory";
+    case "Mkdir":
+      return `Create directory ${String(input.path ?? "")}`;
     case "Write":
       return `Write ${file}`;
     case "Edit":

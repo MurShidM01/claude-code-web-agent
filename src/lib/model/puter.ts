@@ -135,7 +135,8 @@ export class PuterModelTransport implements ModelTransport {
       response = await puter.ai.chat(messages, {
         model: request.model,
         provider: request.provider,
-        stream: true,
+        stream: request.stream !== false,
+        ...(request.reasoning ? { reasoning_effort: request.reasoningEffort || "medium" } : {}),
         tools: request.tools.map((tool) => ({
           type: "function",
           function: {

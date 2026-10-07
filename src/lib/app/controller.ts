@@ -9,12 +9,18 @@ import { findModel, type ModelSort } from "@/lib/model/catalog";
 import type { ModelCatalog } from "@/lib/model/types";
 import { classifyAuthError, loadPuter, PuterModelTransport, type PuterUser } from "@/lib/model/puter";
 import type { ModelMessage, ModelTransport } from "@/lib/model/types";
+import { providerRequest } from "@/lib/providers/client";
+import { resolveCapabilities } from "@/lib/providers/discover";
+import { RoutedModelTransport } from "@/lib/providers/router";
+import type { ConfirmRequest, DialogTone } from "@/components/ui/AlertDialog";
+import type { AuthFlowState, CustomModelEntry, ModelOverride, ProviderAccount, SettingsTab } from "@/lib/providers/types";
+import { hasSecret } from "@/lib/providers/types";
 import { log, type LogEntry } from "@/lib/observability/log";
 import { addSessionRule } from "@/lib/permissions/engine";
 import type { SessionRule } from "@/lib/permissions/types";
 import type { PermissionMode } from "@/lib/permissions/types";
 import { createPersistence, type PersistedConversation, type PersistedWorkspace, type Persistence } from "@/lib/persistence/db";
-import { applyTheme, DEFAULT_SETTINGS, resolveTheme, type Settings, type ThemePreference } from "@/lib/persistence/settings";
+import { applyTheme, DEFAULT_SETTINGS, normalizeSettings, resolveTheme, type Settings, type ThemePreference } from "@/lib/persistence/settings";
 import { createToolRegistry, toolsForSubagent } from "@/lib/tools/builtins";
 import { BridgeClient, directTransport, proxiedTransport, type BridgeHealth } from "@/lib/workspace/bridge-client";
 import { FileSystemAccessWorkspace, fileSystemAccessSupported } from "@/lib/workspace/fsa";
@@ -50,12 +56,15 @@ export interface AppState {
   explorerOpen: boolean;
   paletteOpen: boolean;
   settingsOpen: boolean;
+  settingsTab: SettingsTab;
+  authFlow: AuthFlowState | null;
   connectionOpen: boolean;
   previewPath: string | null;
   previewText: string | null;
   previewError: string | null;
-  authDialog: { title: string; message: string } | null;
-  notice: { title: string; message: string } | null;
+  authDialog: { title: string; message: string; tone?: DialogTone } | null;
+  notice: { title: string; message: string; tone?: DialogTone } | null;
+  confirm: ConfirmRequest | null;
   auth: { status: "checking" | "signed-out" | "signing-in" | "signed-in" | "error"; user: PuterUser | null; error?: string };
   models: { status: "idle" | "loading" | "ready" | "error"; catalog: ModelCatalog | null; error?: string; search: string; provider: string; sort: ModelSort };
   bridge: { status: "checking" | "connected" | "unavailable"; transport: "proxy" | "direct" | "none"; health: BridgeHealth | null; error?: string };
@@ -86,13 +95,15 @@ export class AppController {
   private directToken: string | null = null;
   private fsa: FileSystemAccessWorkspace | null = null;
   private model: ModelTransport;
+  private router: RoutedModelTransport | null = null;
   private unsubscribeLog: (() => void) | null = null;
+  private authAbort: AbortController | null = null;
+  private confirmResolve: ((ok: boolean) => void) | null = null;
 
   private pinnedBridge = false;
 
   constructor(options?: { persistence?: Persistence; model?: ModelTransport; bridge?: BridgeClient }) {
     this.persistence = options?.persistence ?? createPersistence();
-    this.model = options?.model ?? new PuterModelTransport();
     if (options?.bridge) {
       this.bridgeClient = options.bridge;
       this.pinnedBridge = true;
@@ -105,12 +116,15 @@ export class AppController {
       explorerOpen: false,
       paletteOpen: false,
       settingsOpen: false,
+      settingsTab: "appearance",
+      authFlow: null,
       connectionOpen: false,
       previewPath: null,
       previewText: null,
       previewError: null,
       authDialog: null,
       notice: null,
+      confirm: null,
       auth: { status: "checking", user: null },
       models: { status: "idle", catalog: null, search: "", provider: "all", sort: "name" },
       bridge: { status: "checking", transport: "none", health: null },
@@ -125,6 +139,19 @@ export class AppController {
       fsaSupported: false,
       catalog: bundledCatalog(),
     };
+    if (options?.model) {
+      this.model = options.model;
+    } else {
+      this.router = new RoutedModelTransport(
+        () => ({
+          settings: this.snapshot.settings,
+          bridgeStatus: this.snapshot.bridge.status,
+          bridgeTransport: this.snapshot.bridge.transport,
+        }),
+        (account) => this.upsertAccount(account),
+      );
+      this.model = this.router;
+    }
   }
 
   subscribe = (listener: Listener) => {
@@ -144,7 +171,7 @@ export class AppController {
   }
 
   async bootstrap() {
-    const settings = await this.persistence.loadSettings();
+    const settings = normalizeSettings(await this.persistence.loadSettings());
     applyTheme(settings.theme);
     const saved = await this.persistence.listConversations();
     for (const item of saved) {
@@ -267,20 +294,24 @@ export class AppController {
       };
       const active = this.active();
       const missing = active?.modelId ? !findModel(catalog, active.modelId, active.provider) : false;
+      const noticeMessage = missing
+        ? "The previously selected model is no longer in the live catalog."
+        : this.router?.lastNotice || undefined;
       this.set({
-        models: { ...this.snapshot.models, status: "ready", catalog, error: missing ? "The previously selected model is no longer in the Puter catalog." : undefined },
+        models: { ...this.snapshot.models, status: "ready", catalog, error: noticeMessage },
+        ...(noticeMessage
+          ? { notice: { title: missing ? "Model no longer available" : "Provider notice", message: noticeMessage, tone: "warning" as const } }
+          : {}),
       });
       if (missing && active) {
         active.modelId = null;
         this.touch(active);
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load models.";
       this.set({
-        models: {
-          ...this.snapshot.models,
-          status: "error",
-          error: error instanceof Error ? error.message : "Could not load models from Puter.",
-        },
+        models: { ...this.snapshot.models, status: "error", error: message },
+        notice: { title: "Could not load models", message, tone: "danger" },
       });
     }
   }
@@ -342,12 +373,240 @@ export class AppController {
     this.set({ settingsOpen: open });
   }
 
+  openSettings(tab?: SettingsTab) {
+    this.set({ settingsOpen: true, settingsTab: tab ?? this.snapshot.settingsTab });
+  }
+
+  setSettingsTab(tab: SettingsTab) {
+    this.set({ settingsTab: tab });
+  }
+
+  setReasoningEnabled(enabled: boolean) {
+    this.updateSettings({ reasoningEnabled: enabled });
+  }
+
+  setStreamingEnabled(enabled: boolean) {
+    this.updateSettings({ streamingEnabled: enabled });
+  }
+
+  setVisionEnabled(enabled: boolean) {
+    this.updateSettings({ visionEnabled: enabled });
+  }
+
+  setToolsEnabled(enabled: boolean) {
+    this.updateSettings({ toolsEnabled: enabled });
+  }
+
+  upsertAccount(account: ProviderAccount) {
+    const existing = this.snapshot.settings.providers.find((item) => item.id === account.id);
+    const providers = existing
+      ? this.snapshot.settings.providers.map((item) => (item.id === account.id ? { ...item, ...account, id: item.id } : item))
+      : [...this.snapshot.settings.providers, account];
+    this.updateSettings({ providers });
+  }
+
+  removeProvider(id: string) {
+    this.updateSettings({
+      providers: this.snapshot.settings.providers.filter((item) => item.id !== id),
+      customModels: this.snapshot.settings.customModels.filter((item) => item.providerId !== id),
+    });
+    void this.refreshModels();
+  }
+
+  setProviderEnabled(id: string, enabled: boolean) {
+    this.updateSettings({
+      providers: this.snapshot.settings.providers.map((item) => (item.id === id ? { ...item, enabled } : item)),
+    });
+    void this.refreshModels();
+  }
+
+  addCustomProvider(input: { label: string; baseUrl: string; apiKey: string; endpoint: ProviderAccount["endpoint"] }) {
+    const account: ProviderAccount = {
+      id: createId("acct"),
+      kind: "custom",
+      label: input.label.trim() || "Custom",
+      enabled: true,
+      createdAt: Date.now(),
+      baseUrl: input.baseUrl.trim().replace(/\/$/, ""),
+      apiKey: input.apiKey.trim() || undefined,
+      endpoint: input.endpoint || "auto",
+    };
+    this.upsertAccount(account);
+    void this.refreshModels();
+    return account.id;
+  }
+
+  updateCustomProvider(id: string, patch: Partial<Pick<ProviderAccount, "label" | "baseUrl" | "apiKey" | "endpoint" | "enabled">>) {
+    const current = this.snapshot.settings.providers.find((item) => item.id === id);
+    if (!current) return;
+    const next = { ...current, ...patch };
+    if (patch.apiKey === "") next.apiKey = current.apiKey;
+    if (patch.baseUrl) next.baseUrl = patch.baseUrl.trim().replace(/\/$/, "");
+    this.upsertAccount(next);
+  }
+
+  addCustomModel(entry: Omit<CustomModelEntry, "providerId"> & { providerId: string }) {
+    const customModels = [
+      ...this.snapshot.settings.customModels.filter((item) => !(item.providerId === entry.providerId && item.id === entry.id)),
+      entry,
+    ];
+    this.updateSettings({ customModels });
+    void this.refreshModels();
+  }
+
+  removeCustomModel(providerId: string, id: string) {
+    this.updateSettings({ customModels: this.snapshot.settings.customModels.filter((item) => !(item.providerId === providerId && item.id === id)) });
+    void this.refreshModels();
+  }
+
+  setModelOverride(key: string, patch: Partial<Omit<ModelOverride, "key">>) {
+    const current = this.snapshot.settings.modelOverrides.find((item) => item.key === key) ?? { key };
+    const next = { ...current, ...patch };
+    const modelOverrides = [...this.snapshot.settings.modelOverrides.filter((item) => item.key !== key), next];
+    this.updateSettings({ modelOverrides });
+  }
+
+  cancelAuthFlow() {
+    this.authAbort?.abort();
+    this.authAbort = null;
+    this.set({ authFlow: null });
+  }
+
+  async connectOpenAI() {
+    await this.runLogin("openai-codex", "/oauth/openai/start", {}, "Choose an account in the OpenAI window.");
+  }
+
+  async connectKiro(input: { region?: string; startUrl?: string } = {}) {
+    await this.runLogin("kiro", "/oauth/kiro/start", input, "Approve the Kiro device code in the browser window.");
+  }
+
+  async completeOpenAICallback(callbackUrl: string) {
+    const target = this.providerTarget("openai-codex");
+    if (!target) return;
+    this.set({ authFlow: { provider: "openai-codex", phase: "waiting", message: "Exchanging the callback…", backend: target.kind === "api" ? "api" : "bridge" } });
+    try {
+      const result = await providerRequest<{ account: ProviderAccount }>("/oauth/openai/exchange", target, { body: { callbackUrl } });
+      this.finishLogin(result.account);
+    } catch (error) {
+      this.set({ authFlow: { provider: "openai-codex", phase: "error", message: error instanceof Error ? error.message : "Could not finish OpenAI sign-in." } });
+    }
+  }
+
+  private providerTarget(kind: "openai-codex" | "kiro") {
+    if (!this.router) {
+      this.set({ notice: { title: "Providers are unavailable", message: "This session is using a fixed model transport." } });
+      return null;
+    }
+    try {
+      return this.router.loginTargetFor(kind);
+    } catch (error) {
+      this.set({
+        authFlow: { provider: kind, phase: "error", message: error instanceof Error ? error.message : "Could not start sign-in." },
+        settingsOpen: true,
+        settingsTab: "providers",
+      });
+      return null;
+    }
+  }
+
+  private async runLogin(kind: "openai-codex" | "kiro", path: string, body: unknown, waiting: string) {
+    const target = this.providerTarget(kind);
+    if (!target) return;
+    this.authAbort?.abort();
+    const abort = new AbortController();
+    this.authAbort = abort;
+    this.set({
+      settingsOpen: true,
+      settingsTab: "providers",
+      authFlow: { provider: kind, phase: "starting", message: "Contacting the provider…", backend: target.kind === "api" ? "api" : "bridge" },
+    });
+    try {
+      const started = await providerRequest<{ authorizeUrl?: string; verificationUrl?: string; userCode?: string; state: string }>(path, target, { method: "POST", body, signal: abort.signal });
+      if (started.authorizeUrl) window.open(started.authorizeUrl, "kiln-openai-auth", "popup,width=520,height=760");
+      if (started.verificationUrl) window.open(started.verificationUrl, "kiln-kiro-auth", "popup,width=520,height=760");
+      this.set({
+        authFlow: {
+          provider: kind,
+          phase: "waiting",
+          message: waiting,
+          authorizeUrl: started.authorizeUrl,
+          verificationUrl: started.verificationUrl,
+          userCode: started.userCode,
+          backend: target.kind === "api" ? "api" : "bridge",
+        },
+      });
+      const pollPath = kind === "kiro" ? "/oauth/kiro/poll" : "/oauth/openai/poll";
+      const account = await this.pollLogin(target, `${pollPath}?state=${encodeURIComponent(started.state)}`, abort.signal);
+      this.finishLogin(account);
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      this.set({ authFlow: { provider: kind, phase: "error", message: error instanceof Error ? error.message : "Sign-in failed." } });
+    }
+  }
+
+  private async pollLogin(target: NonNullable<ReturnType<AppController["providerTarget"]>>, path: string, signal: AbortSignal): Promise<ProviderAccount> {
+    const deadline = Date.now() + 10 * 60_000;
+    while (Date.now() < deadline) {
+      if (signal.aborted) throw new Error("Sign-in cancelled.");
+      const result = await providerRequest<{ status: string; account?: ProviderAccount }>(path, target, { signal });
+      if (result.status === "ready" && result.account) return result.account;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error("Sign-in timed out. Start again when you are ready.");
+  }
+
+  private finishLogin(account: ProviderAccount) {
+    this.upsertAccount(account);
+    this.set({
+      authFlow: {
+        provider: account.kind === "kiro" ? "kiro" : "openai-codex",
+        phase: "done",
+        message: account.email ? `Signed in as ${account.email}. Loading models from the account.` : "Signed in. Loading models from the account.",
+      },
+    });
+    void this.refreshModels();
+  }
+
+  providerConnected(): boolean {
+    return this.snapshot.auth.status === "signed-in" || this.snapshot.settings.providers.some((account) => account.enabled && hasSecret(account));
+  }
+
   setConnectionOpen(open: boolean) {
     this.set({ connectionOpen: open });
   }
 
   dismissDialogs() {
     this.set({ authDialog: null, notice: null });
+  }
+
+  notify(title: string, message: string, tone?: DialogTone) {
+    this.set({ notice: { title, message, tone } });
+  }
+
+  requestConfirm(input: ConfirmRequest): Promise<boolean> {
+    if (this.confirmResolve) {
+      this.confirmResolve(false);
+      this.confirmResolve = null;
+    }
+    return new Promise((resolve) => {
+      this.confirmResolve = resolve;
+      this.set({
+        confirm: {
+          title: input.title,
+          message: input.message,
+          confirmLabel: input.confirmLabel ?? "Confirm",
+          cancelLabel: input.cancelLabel ?? "Cancel",
+          tone: input.tone ?? "danger",
+        },
+      });
+    });
+  }
+
+  answerConfirm(ok: boolean) {
+    const resolve = this.confirmResolve;
+    this.confirmResolve = null;
+    this.set({ confirm: null });
+    resolve?.(ok);
   }
 
   newConversation() {
@@ -664,7 +923,7 @@ export class AppController {
     if (!trimmed && !attachments.length) return;
     if (this.snapshot.running) return;
     if (this.snapshot.auth.status !== "signed-in" && this.model instanceof PuterModelTransport) {
-      this.set({ authDialog: { title: "Sign in to use a model", message: "Kiln uses your Puter account for model access. Sign in, then choose a model from the live catalog." } });
+      this.set({ authDialog: { title: "Sign in to use a model", message: "Sign in with Puter, or connect OpenAI Code, Kiro, or a custom provider in Settings. Kiln does not ship a hardcoded model." } });
       return;
     }
     const conversation = this.ensureConversation();
@@ -672,7 +931,7 @@ export class AppController {
       this.set({
         notice: {
           title: "Choose a model",
-          message: this.snapshot.models.error || "Load the Puter catalog and pick a model. Kiln does not fall back to a hardcoded model.",
+          message: this.snapshot.models.error || "Load a provider and pick a model. Kiln does not fall back to a hardcoded model.",
         },
       });
       return;
@@ -710,6 +969,11 @@ export class AppController {
       if (notes) userText = `${userText}\n\n${notes}`;
     }
     const images = attachments.filter((item) => item.dataUrl && item.mediaType.startsWith("image/")).map((item) => ({ mediaType: item.mediaType, dataUrl: item.dataUrl! }));
+    const selected = findModel(this.snapshot.models.catalog, conversation.modelId, conversation.provider);
+    const caps = resolveCapabilities(selected, this.snapshot.settings);
+    if (images.length && !caps.vision) {
+      userText += `\n\n[${images.length} image attachment${images.length === 1 ? " was" : "s were"} not sent. Vision is off for this model. Enable it in Settings or pick a model that reports vision.]`;
+    }
     this.apply(conversation, {
       type: "user_message",
       id: createId("user"),
@@ -718,6 +982,8 @@ export class AppController {
       attachments: attachments.map((item) => ({ name: item.name, mediaType: item.mediaType })),
       createdAt: Date.now(),
     });
+    const stamped = conversation.transcript.blocks.at(-1);
+    if (stamped?.kind === "user") stamped.historyLength = conversation.modelMessages.length;
     if (conversation.title === "New conversation") conversation.title = titleFrom(trimmed);
     this.set({ running: true });
     const controller = new AbortController();
@@ -759,7 +1025,11 @@ export class AppController {
         }),
         history: conversation.modelMessages,
         userText,
-        images,
+        images: caps.vision ? images : undefined,
+        stream: caps.streaming,
+        reasoning: caps.reasoning,
+        reasoningEffort: caps.reasoningEffort,
+        toolAllowlist: caps.tools ? undefined : [],
         loadSkill: (name) => {
           const skill = findSkill(this.snapshot.catalog, name);
           return skill ? { name: skill.name, body: skill.body } : null;
@@ -794,7 +1064,10 @@ export class AppController {
             systemPrompt: `${plugin?.body ?? `You are a ${subagentType} subagent. ${description}`}\n\nReturn a concise factual report. Do not pretend you edited files unless a tool result says so.`,
             history: [],
             userText: prompt,
-            toolAllowlist: allow,
+            stream: caps.streaming,
+            reasoning: caps.reasoning,
+            reasoningEffort: caps.reasoningEffort,
+            toolAllowlist: caps.tools ? allow : [],
             depth: 1,
             loadSkill: (name) => {
               const skill = findSkill(this.snapshot.catalog, name);
@@ -818,6 +1091,98 @@ export class AppController {
       this.touch(conversation);
       await this.persist(conversation);
     }
+  }
+
+  async retryMessage(blockId: string) {
+    if (this.snapshot.running) {
+      this.notify("Wait for the current turn", "Retry is available once Kiln finishes, or after you stop it.", "warning");
+      return;
+    }
+    if (!this.readyToSend()) return;
+    const conversation = this.active();
+    if (!conversation) return;
+    const blocks = conversation.transcript.blocks;
+    const index = blocks.findIndex((block) => block.id === blockId);
+    if (index < 0) return;
+    let userIndex = blocks[index]?.kind === "user" ? index : -1;
+    if (userIndex < 0) {
+      for (let cursor = index; cursor >= 0; cursor -= 1) {
+        if (blocks[cursor]?.kind === "user") {
+          userIndex = cursor;
+          break;
+        }
+      }
+    }
+    const user = blocks[userIndex];
+    if (!user || user.kind !== "user") {
+      this.notify("Nothing to retry", "This reply is not tied to a message you sent.", "warning");
+      return;
+    }
+    if (!user.text.trim()) {
+      this.notify("Nothing to send", "This message has no text left to retry. Attached files were not kept.", "warning");
+      return;
+    }
+    if (blocks.length - userIndex > 1) {
+      const ok = await this.requestConfirm({
+        title: "Retry this message?",
+        message: user.attachments?.length
+          ? "Replies after it will be removed. Attached files are not kept, so only the text is sent again."
+          : "Replies after it will be removed, then Kiln will send it again.",
+        confirmLabel: "Retry",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+    const text = user.text;
+    this.truncateBeforeUser(conversation, userIndex);
+    await this.send(text);
+  }
+
+  async editUserMessage(blockId: string, text: string): Promise<boolean> {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (this.snapshot.running) {
+      this.notify("Wait for the current turn", "Edit is available once Kiln finishes, or after you stop it.", "warning");
+      return false;
+    }
+    if (!this.readyToSend()) return false;
+    const conversation = this.active();
+    if (!conversation) return false;
+    const index = conversation.transcript.blocks.findIndex((block) => block.id === blockId && block.kind === "user");
+    if (index < 0) return false;
+    const ok = await this.requestConfirm({
+      title: "Edit this message?",
+      message: "Saving replaces this message, removes everything after it, and sends the new text.",
+      confirmLabel: "Save and send",
+      tone: "danger",
+    });
+    if (!ok) return false;
+    this.truncateBeforeUser(conversation, index);
+    await this.send(trimmed);
+    return true;
+  }
+
+  private readyToSend(): boolean {
+    if (this.snapshot.auth.status !== "signed-in" && this.model instanceof PuterModelTransport) {
+      this.set({ authDialog: { title: "Sign in to use a model", message: "Sign in with Puter, or connect OpenAI Code, Kiro, or a custom provider in Settings. Kiln does not ship a hardcoded model.", tone: "warning" } });
+      return false;
+    }
+    const conversation = this.active();
+    if (!conversation?.modelId || !findModel(this.snapshot.models.catalog, conversation.modelId, conversation.provider)) {
+      this.notify("Choose a model", this.snapshot.models.error || "Load a provider and pick a model. Kiln does not fall back to a hardcoded model.", "warning");
+      return false;
+    }
+    return true;
+  }
+
+  private truncateBeforeUser(conversation: ConversationState, userIndex: number) {
+    const user = conversation.transcript.blocks[userIndex];
+    const kept = conversation.transcript.blocks.slice(0, userIndex);
+    const stamped = user?.kind === "user" ? user.historyLength : undefined;
+    const cut = typeof stamped === "number" ? stamped : modelCutForUsers(conversation.modelMessages, kept.filter((block) => block.kind === "user").length);
+    conversation.modelMessages = conversation.modelMessages.slice(0, Math.max(0, cut));
+    conversation.transcript = { ...conversation.transcript, blocks: kept, phase: "understanding", phaseDetail: "Ready" };
+    this.touch(conversation);
   }
 
   cancel() {
@@ -909,10 +1274,19 @@ export class AppController {
     conversation.transcript = reduceEvent(conversation.transcript, event);
     conversation.updatedAt = Date.now();
     if (this.snapshot.activeId === conversation.id) {
+      const notice =
+        event.type === "error" && event.source !== "tool"
+          ? {
+              title: event.source === "model" ? "The model stopped" : "Something went wrong",
+              message: event.message,
+              tone: "danger" as const,
+            }
+          : undefined;
       this.set({
         phase: conversation.transcript.phase,
         phaseDetail: conversation.transcript.phaseDetail,
         conversations: summaries(this.conversations),
+        ...(notice ? { notice } : {}),
       });
     }
   }
@@ -971,6 +1345,16 @@ export class AppController {
     this.unsubscribeLog?.();
     this.abort?.abort();
   }
+}
+
+function modelCutForUsers(messages: { role: string }[], keptUsers: number): number {
+  let seen = 0;
+  for (let index = 0; index < messages.length; index += 1) {
+    if (messages[index]?.role !== "user") continue;
+    if (seen === keptUsers) return index;
+    seen += 1;
+  }
+  return messages.length;
 }
 
 function summaries(conversations: Map<string, ConversationState>) {

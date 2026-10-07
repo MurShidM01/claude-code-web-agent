@@ -66,6 +66,11 @@ export type AgentEvent =
       text: string;
     }
   | {
+      type: "assistant_reasoning_delta";
+      messageId: string;
+      delta: string;
+    }
+  | {
       type: "tool_requested";
       toolUseId: string;
       name: string;

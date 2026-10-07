@@ -19,7 +19,7 @@ A remote deployment cannot access your computer. Shell, git, and process control
 
 ## How a turn works
 
-1. The browser loads Puter.js and discovers providers and models at runtime. Nothing in the catalog is hardcoded.
+1. The browser loads Puter.js, or you connect OpenAI Code, Kiro, or a custom endpoint. Models are fetched from that account. Nothing in the catalog is hardcoded.
 2. You pick a permission mode. It is enforced in the tool layer before the tool runs.
 3. The agent loop streams text and tool calls until the task is done, refused, failed, or you stop it.
 4. File and command tools go through a workspace port. In local mode that port is the bridge, reached via `/api/bridge` so the pairing token stays on the machine. In deploy mode the same port is a bridge you pair directly.

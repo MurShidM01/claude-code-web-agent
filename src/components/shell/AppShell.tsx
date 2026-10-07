@@ -4,16 +4,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { ArrowDown, FolderOpen, FolderPlus, Menu as MenuIcon, PanelRight } from "lucide-react";
 import { DiffCard, PlanCard, QuestionCard, ToolCard } from "@/components/activity/Cards";
 import { ConnectionDialog } from "@/components/bridge/ConnectionDialog";
+import { AssistantBubble, UserBubble } from "@/components/chat/MessageBubble";
 import { Composer } from "@/components/chat/Composer";
 import { EmptyState } from "@/components/chat/EmptyState";
-import { MarkdownView } from "@/components/chat/MarkdownView";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import { PermissionDialog } from "@/components/permissions/PermissionDialog";
 import { AppProvider, useApp, useAppState } from "@/components/providers";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { ErrorBoundary } from "@/components/shell/ErrorBoundary";
 import { Sidebar } from "@/components/shell/Sidebar";
-import { Dialog } from "@/components/ui/Dialog";
+import { AlertDialog, ConfirmDialog, confirmed } from "@/components/ui/AlertDialog";
 import { Explorer } from "@/components/workspace/Explorer";
 import { PHASE_LABEL } from "@/lib/agent/phases";
 import type { PermissionMode } from "@/lib/permissions/types";
@@ -41,6 +41,7 @@ function Shell() {
   const dockRef = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
   const [pinned, setPinned] = useState(true);
+  const [projectHintDismissed, setProjectHintDismissed] = useState(false);
   const stick = useRef(true);
 
   /* Keep the thread's bottom padding in step with the floating composer. */
@@ -133,15 +134,31 @@ function Shell() {
         state={state}
         onNew={() => controller.newConversation()}
         onSelect={(id) => controller.selectConversation(id)}
-        onDelete={(id) => void controller.deleteConversation(id)}
+        onDelete={(id) => {
+          const title = state.conversations.find((item) => item.id === id)?.title ?? "This conversation";
+          void confirmed(controller, {
+            title: "Delete this conversation?",
+            message: `“${title}” will be removed from this browser. This cannot be undone.`,
+            confirmLabel: "Delete",
+            tone: "danger",
+          }, () => controller.deleteConversation(id));
+        }}
         onClose={() => controller.toggleSidebar()}
         mode={mode}
         onMode={(next) => controller.setPermissionMode(next as PermissionMode)}
         onTheme={(theme) => controller.setTheme(theme)}
-        onSettings={() => controller.setSettingsOpen(true)}
+        onSettings={() => controller.openSettings("appearance")}
+        onProviders={() => controller.openSettings("providers")}
         onConnect={() => controller.setConnectionOpen(true)}
         onSignIn={() => void controller.signIn()}
-        onSignOut={() => controller.signOut()}
+        onSignOut={() => {
+          void confirmed(controller, {
+            title: "Sign out of Puter?",
+            message: "This browser will forget the Puter session. Connected OpenAI, Kiro, and custom providers stay until you remove them.",
+            confirmLabel: "Sign out",
+            tone: "danger",
+          }, () => controller.signOut());
+        }}
         onSwitch={() => void controller.switchAccount()}
       />
       <main className="stage" ref={stageRef}>
@@ -188,23 +205,8 @@ function Shell() {
           <div className="column">
             {blocks.length === 0 ? <EmptyState state={state} onOpenProject={() => controller.setConnectionOpen(true)} /> : null}
             {blocks.map((block) => {
-              if (block.kind === "user") {
-                return (
-                  <div key={block.id} className="msg user">
-                    <div className="user-msg">
-                      {block.text}
-                      {block.attachments?.length ? <div className="meta">{block.attachments.map((item) => item.name).join(", ")}</div> : null}
-                    </div>
-                  </div>
-                );
-              }
-              if (block.kind === "assistant") {
-                return (
-                  <div key={block.id} className="msg assistant">
-                    <MarkdownView text={block.text} streaming={block.streaming} />
-                  </div>
-                );
-              }
+              if (block.kind === "user") return <UserBubble key={block.id} block={block} controller={controller} running={running} />;
+              if (block.kind === "assistant") return <AssistantBubble key={block.id} block={block} controller={controller} running={running} />;
               if (block.kind === "tool") return <ToolCard key={block.id} block={block} />;
               if (block.kind === "diff") {
                 return (
@@ -212,7 +214,14 @@ function Shell() {
                     key={block.id}
                     block={block}
                     onOpen={(path) => void controller.openPreview(path)}
-                    onRevert={(path, original) => void controller.revertDiff(path, original)}
+                    onRevert={(path, original) => {
+                      void confirmed(controller, {
+                        title: "Revert this change?",
+                        message: `${path} will be restored to the contents from before that edit.`,
+                        confirmLabel: "Revert",
+                        tone: "danger",
+                      }, () => controller.revertDiff(path, original));
+                    }}
                   />
                 );
               }
@@ -222,12 +231,17 @@ function Shell() {
               }
               if (block.kind === "error") {
                 return (
-                  <div key={block.id} className="card">
-                    <div className="card-head">
+                  <button
+                    key={block.id}
+                    type="button"
+                    className="card alert-card"
+                    onClick={() => controller.notify(block.source === "model" ? "The model stopped" : "Something went wrong", block.message, "danger")}
+                  >
+                    <span className="card-head">
                       <span className="badge bad">{block.source}</span>
                       <span className="summary">{block.message}</span>
-                    </div>
-                  </div>
+                    </span>
+                  </button>
                 );
               }
               return null;
@@ -256,25 +270,58 @@ function Shell() {
       <SettingsDialog state={state} controller={controller} />
       <CommandPalette state={state} controller={controller} />
       <ConnectionDialog state={state} controller={controller} />
-      <Dialog open={Boolean(state.authDialog)} title={state.authDialog?.title ?? ""} onClose={() => controller.dismissDialogs()}>
-        <p>{state.authDialog?.message}</p>
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={() => controller.dismissDialogs()}>
-            Close
-          </button>
-          <button type="button" className="btn primary" onClick={() => void controller.signIn()}>
-            Sign in
-          </button>
-        </div>
-      </Dialog>
-      <Dialog open={Boolean(state.notice)} title={state.notice?.title ?? ""} onClose={() => controller.dismissDialogs()}>
-        <p>{state.notice?.message}</p>
-        <div className="dialog-actions">
-          <button type="button" className="btn primary" onClick={() => controller.dismissDialogs()}>
-            OK
-          </button>
-        </div>
-      </Dialog>
+      <AlertDialog
+        open={Boolean(state.authDialog)}
+        title={state.authDialog?.title ?? ""}
+        message={state.authDialog?.message ?? ""}
+        tone={state.authDialog?.tone ?? "warning"}
+        onClose={() => controller.dismissDialogs()}
+        actions={
+          <>
+            <button type="button" className="btn" onClick={() => controller.dismissDialogs()}>
+              Close
+            </button>
+            <button type="button" className="btn" onClick={() => controller.openSettings("providers")}>
+              Other providers
+            </button>
+            <button type="button" className="btn primary" data-autofocus onClick={() => void controller.signIn()}>
+              Sign in with Puter
+            </button>
+          </>
+        }
+      />
+      <AlertDialog
+        open={Boolean(state.notice)}
+        title={state.notice?.title ?? ""}
+        message={state.notice?.message ?? ""}
+        tone={state.notice?.tone}
+        onClose={() => controller.dismissDialogs()}
+      />
+      <AlertDialog
+        open={state.booted && state.bridge.status !== "checking" && state.workspace.kind === "none" && !projectHintDismissed && !state.connectionOpen && !state.settingsOpen && !state.paletteOpen && !state.notice && !state.authDialog && !state.confirm}
+        title="No project open"
+        message="Kiln can talk, but it will not invent file changes or command output until you import a folder."
+        tone="warning"
+        onClose={() => setProjectHintDismissed(true)}
+        actions={
+          <>
+            <button type="button" className="btn" data-autofocus onClick={() => setProjectHintDismissed(true)}>
+              Keep chatting
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                setProjectHintDismissed(true);
+                controller.setConnectionOpen(true);
+              }}
+            >
+              Import a folder
+            </button>
+          </>
+        }
+      />
+      <ConfirmDialog request={state.confirm} onConfirm={() => controller.answerConfirm(true)} onCancel={() => controller.answerConfirm(false)} />
     </div>
   );
 }

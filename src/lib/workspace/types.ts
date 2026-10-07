@@ -92,6 +92,8 @@ export interface WorkspaceInfo {
 export interface WorkspacePort {
   info(): WorkspaceInfo | null;
   readFile(path: string, offset?: number, limit?: number): Promise<FileReadResult>;
+  /** Optional. Image tools use this when the backend can return bytes. */
+  readBinary?(path: string, maxBytes?: number): Promise<{ mediaType: string; base64: string; bytes: number }>;
   writeFile(path: string, content: string): Promise<{ path: string; created: boolean; bytes: number }>;
   deleteFile(path: string, recursive?: boolean): Promise<{ path: string }>;
   renamePath(from: string, to: string, overwrite?: boolean): Promise<{ from: string; to: string }>;

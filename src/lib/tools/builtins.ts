@@ -17,7 +17,7 @@ import { isNotFoundError } from "@/lib/workspace/errors";
 import { languageFromPath } from "@/lib/workspace/path";
 import type { WorkspacePort } from "@/lib/workspace/types";
 
-const READ_ONLY = ["Read", "LS", "Glob", "Grep", "Stat", "GitStatus", "GitDiff", "GitLog", "BashOutput", "WebFetch", "WebSearch", "TodoWrite", "Skill", "ReportFindings"];
+const READ_ONLY = ["Read", "ReadMany", "ImageRead", "MemoryRead", "LS", "Glob", "Grep", "Stat", "GitStatus", "GitDiff", "GitLog", "BashOutput", "WebFetch", "WebSearch", "TodoWrite", "Skill", "ReportFindings"];
 const PLAN_TOOLS = [...READ_ONLY, "AskUserQuestion"];
 
 export function createToolRegistry(): ToolRegistry {
@@ -491,6 +491,87 @@ function buildTools(): ToolDefinition[] {
       const taskId = requiredString(input, "task_id");
       const result = await ctx.call(classifyTool("TaskStop", input), (ws) => ws.killProcess(taskId));
       return { ok: true, output: { message: result.killed ? "Stopped." : "Process was not running.", task_id: taskId, task_type: "shell" } };
+    }),
+    def("ReadMany", async (input, ctx) => {
+      const paths = Array.isArray(input.paths) ? input.paths.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 8) : [];
+      if (!paths.length) throw new ToolInputError("paths must include at least one file.");
+      const files = [];
+      for (const filePath of paths) {
+        const result = await ctx.call(classifyTool("Read", { file_path: filePath }), (ws) => ws.readFile(filePath, 1, 400));
+        if (!result.binary) ctx.readState.set(normalizeKey(filePath), result.contentHash ?? hashContent(result.content));
+        files.push({
+          filePath: result.path,
+          content: result.binary ? "" : result.numbered || result.content,
+          binary: result.binary,
+          truncated: result.truncated,
+        });
+      }
+      return { ok: true, output: { files } };
+    }),
+    def("ImageRead", async (input, ctx) => {
+      const filePath = requiredString(input, "file_path");
+      return ctx.call(classifyTool("ImageRead", input), async (ws) => {
+        if (!ws.readBinary) {
+          return {
+            ok: false,
+            isError: true,
+            output: {
+              code: "unsupported",
+              message: "This connection cannot return image bytes. Attach the image in the composer, or connect the local bridge.",
+            },
+          };
+        }
+        const image = await ws.readBinary(filePath);
+        return {
+          ok: true,
+          output: {
+            type: "image",
+            filePath,
+            mediaType: image.mediaType,
+            bytes: image.bytes,
+            vision: { mediaType: image.mediaType, dataUrl: `data:${image.mediaType};base64,${image.base64}` },
+          },
+        };
+      });
+    }),
+    def("MemoryRead", async (_input, ctx) => {
+      return ctx.call(classifyTool("MemoryRead", {}), async (ws) => {
+        try {
+          const file = await ws.readFile(".kiln/MEMORY.md");
+          return { ok: true, output: { path: ".kiln/MEMORY.md", content: file.content } };
+        } catch (error) {
+          if (isNotFoundError(error)) return { ok: true, output: { path: ".kiln/MEMORY.md", content: "", missing: true } };
+          throw error;
+        }
+      });
+    }),
+    def("MemoryWrite", async (input, ctx) => {
+      const content = requiredString(input, "content");
+      const mode = input.mode === "append" ? "append" : "replace";
+      return ctx.call(classifyTool("MemoryWrite", input), async (ws) => {
+        const prior = await readIfExists(ws, ".kiln/MEMORY.md");
+        const next = mode === "append" && prior.content ? `${prior.content.replace(/\s+$/, "")}\n\n${content}\n` : content.endsWith("\n") ? content : `${content}\n`;
+        const written = await ws.writeFile(".kiln/MEMORY.md", next);
+        const diff = buildDiff(".kiln/MEMORY.md", prior.content ?? "", next);
+        return {
+          ok: true,
+          output: { path: ".kiln/MEMORY.md", bytes: written.bytes, mode },
+          diff: {
+            path: ".kiln/MEMORY.md",
+            additions: diff.additions,
+            deletions: diff.deletions,
+            patch: diff.patch,
+            created: written.created,
+            original: prior.content,
+            next,
+          },
+        };
+      });
+    }),
+    def("Mkdir", async (input, ctx) => {
+      const dir = requiredString(input, "path");
+      const created = await ctx.call(classifyTool("Mkdir", input), (ws) => ws.mkdir(dir));
+      return { ok: true, output: { path: created.path, created: true } };
     }),
     def("BashOutput", async (input, ctx) => {
       const taskId = requiredString(input, "task_id");

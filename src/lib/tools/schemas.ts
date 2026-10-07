@@ -266,6 +266,43 @@ export const TOOL_SPECS: ModelToolSpec[] = [
     ["task_id"],
   ),
   tool(
+    "ReadMany",
+    "Read several text files in one call. Prefer this when you already know the paths, instead of calling Read once per file.",
+    {
+      paths: { type: "array", items: { type: "string" }, description: "Workspace paths. At most 8." },
+    },
+    ["paths"],
+  ),
+  tool(
+    "ImageRead",
+    "Read an image file from the workspace so it can be seen. Use this when the task depends on a screenshot, diagram, or other image in the project. Returns the image to the model when vision is enabled.",
+    {
+      file_path: str("Path to a png, jpeg, gif, or webp file."),
+    },
+    ["file_path"],
+  ),
+  tool(
+    "MemoryRead",
+    "Read the project memory note at .kiln/MEMORY.md. Use it to recall decisions from earlier sessions. Missing memory is normal.",
+    {},
+    [],
+  ),
+  tool(
+    "MemoryWrite",
+    "Update the project memory note at .kiln/MEMORY.md. Keep it short: decisions, conventions, and paths. Do not store secrets.",
+    {
+      content: str("The note to store."),
+      mode: { type: "string", enum: ["replace", "append"], description: "replace overwrites the note. append adds to it. Default replace." },
+    },
+    ["content"],
+  ),
+  tool(
+    "Mkdir",
+    "Create a directory, including parents. Prefer Write when you are also creating a file — Write creates parents itself.",
+    { path: str("Directory to create, relative to the workspace.") },
+    ["path"],
+  ),
+  tool(
     "BashOutput",
     "Read the accumulated output and status of a background command started with Bash run_in_background. Use TaskStop to stop it.",
     { task_id: str("Process id returned when the command was backgrounded.") },
