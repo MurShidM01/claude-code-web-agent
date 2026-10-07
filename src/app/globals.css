@@ -321,8 +321,9 @@ button { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 450;
+  min-width: 0;
   transition: background 120ms ease, color 120ms ease;
 }
 .quiet-btn svg, .side-link svg { flex: none; color: var(--text-faint); }
@@ -548,18 +549,34 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
-  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-soft);
   white-space: nowrap;
   min-width: 0;
-  padding: 0 2px;
+  padding: 3px 10px 3px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--bg-soft) 70%, transparent);
+  max-width: min(46vw, 380px);
 }
 .phase i { width: 6px; height: 6px; border-radius: var(--r-pill); background: var(--text-faint); flex: none; }
-.phase.live { color: var(--text-soft); }
+.phase.live { color: var(--text-strong); border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); background: var(--accent-soft); }
 .phase.live i { background: var(--accent); animation: pulse 1.5s ease-in-out infinite; }
+.phase.wait { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, var(--line)); background: var(--warn-soft); }
 .phase.wait i { background: var(--warn); }
+.phase.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 32%, var(--line)); background: var(--danger-soft); }
 .phase.error i { background: var(--danger); }
-.phase .meta { overflow: hidden; text-overflow: ellipsis; max-width: 32ch; }
+.phase .phase-text { flex: none; }
+.phase .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  padding-left: 7px;
+  border-left: 1px solid var(--line);
+  color: var(--text-faint);
+  font-weight: 400;
+}
 @keyframes pulse { 50% { opacity: 0.3; transform: scale(0.82); } }
 
 /* ---------- Thread ---------- */
@@ -2079,17 +2096,21 @@ button.card-head:hover { background: color-mix(in srgb, var(--bg-soft) 70%, tran
 
 @media (max-width: 700px) {
   .phase .meta { display: none; }
+  .phase { max-width: 40vw; }
   .composer-bar .chip { max-width: 40vw; }
   .composer-chip { max-width: 30vw; }
   .model-picker-trigger { max-width: 38vw; }
   .user-msg { max-width: 92%; }
   .msg { margin: 18px 0; }
+  .topbar { gap: 6px; }
+  .topbar h2 { flex: 1 1 auto; min-width: 40px; }
 }
 
 @media (max-width: 560px) {
   .hide-sm { display: none !important; }
   .phase-text { display: none; }
-  .topbar h2 { max-width: 34vw; }
+  .phase { padding: 4px 8px; max-width: 30vw; }
+  .topbar h2 { max-width: 30vw; }
   .composer-bar .chip { max-width: 34vw; }
   .composer-chip { max-width: 28vw; }
   .model-picker-trigger { max-width: 36vw; }
