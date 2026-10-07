@@ -10,11 +10,15 @@ export function ToolCard({ block }: { block: ToolBlock }) {
   const [copied, setCopied] = useState(false);
   const command = block.command;
   const badge = statusBadge(block.status);
+  const busy = block.status === "requested" || block.status === "running";
   return (
-    <article className="card">
+    <article className={`card tool-card${busy ? " busy" : ""}`}>
       <button type="button" className="card-head" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <ChevronRight size={14} className={`chev ${open ? "open" : ""}`} aria-hidden />
-        <span className={`badge ${badge.tone}`}>{badge.label}</span>
+        <span className={`badge ${badge.tone}`}>
+          {busy ? <span className="badge-spinner" aria-hidden /> : null}
+          {badge.label}
+        </span>
         <span className="name">{block.name}</span>
         <span className="summary">{block.summary}</span>
       </button>
@@ -147,7 +151,7 @@ export function QuestionCard({
           <label key={question.id} className="field">
             <span>{question.prompt}</span>
             {question.options?.length ? (
-              <div className="seg">
+              <div className="chip-row">
                 {question.options.map((option) => (
                   <button
                     key={option}

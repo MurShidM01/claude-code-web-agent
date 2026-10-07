@@ -102,6 +102,30 @@ describe("end-to-end agent flows", () => {
   });
 });
 
+describe("send recovery", () => {
+  it("adopts the first live model when none is selected", async () => {
+    const model = new ScriptedModel([{ text: "Answered without a manual pick." }]);
+    const app = new AppController({ persistence: new MemoryPersistence(), model });
+    await app.bootstrap();
+    expect(app.active()).toBeNull();
+
+    await app.send("hello");
+
+    expect(app.active()?.modelId).toBe("scripted-1");
+    expect(app.blocks().some((block) => block.kind === "assistant" && block.text.includes("without a manual pick"))).toBe(true);
+  });
+
+  it("sets the background status back to idle after a turn", async () => {
+    const model = new ScriptedModel([{ text: "done" }]);
+    const app = new AppController({ persistence: new MemoryPersistence(), model });
+    await app.bootstrap();
+    await app.send("go");
+    const snapshot = app.getSnapshot();
+    expect(snapshot.running).toBe(false);
+    expect(snapshot.permission).toBeNull();
+  });
+});
+
 function waitFor(app: AppController, predicate: () => boolean, timeoutMs = 4000): Promise<void> {
   if (predicate()) return Promise.resolve();
   return new Promise((resolve, reject) => {

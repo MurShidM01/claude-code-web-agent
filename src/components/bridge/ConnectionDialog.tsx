@@ -19,16 +19,19 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
 
   return (
     <Dialog open={state.connectionOpen} title="Open a project" wide onClose={() => controller.setConnectionOpen(false)}>
-      <p className="dialog-sub">
-        Kiln reads, edits, and runs commands inside one project folder. Choose the folder this agent should work in — the chat
-        works either way, but no file or command tool runs until a project is open.
-      </p>
+      <div className="connect-head">
+        <h3>Open a project</h3>
+        <p>
+          Kiln reads, edits, and runs commands inside one project folder. The chat works either way, but no file or command tool
+          runs until a project is open.
+        </p>
+      </div>
 
       {connected ? (
-        <div className="dialog-section">
+        <section className="dialog-section">
           <div className="section-label">Current project</div>
           <div className="ws-list">
-            <div className="ws-row active" style={{ cursor: "default" }}>
+            <div className="ws-row active static">
               <span className="ws-icon">
                 <FolderOpen size={16} aria-hidden />
               </span>
@@ -55,11 +58,11 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
               </button>
             </div>
           </div>
-        </div>
+        </section>
       ) : null}
 
       {state.workspaces.length ? (
-        <div className="dialog-section">
+        <section className="dialog-section">
           <div className="section-label">Recent projects</div>
           <div className="ws-list">
             {state.workspaces.map((workspace) => {
@@ -97,36 +100,33 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
               );
             })}
           </div>
-        </div>
+        </section>
       ) : null}
 
-      <div className="dialog-section">
+      <section className="dialog-section">
         <div className="section-label">Open something else</div>
-        <div style={{ display: "grid", gap: 8 }}>
-          <button
-            type="button"
-            className="btn primary block"
-            disabled={!state.fsaSupported}
-            onClick={() => {
-              void confirmed(controller, {
-                title: "Import a folder?",
-                message: "The browser will ask you to choose a folder. Kiln can read and edit files there. Shell and git still need the local bridge.",
-                confirmLabel: "Choose folder",
-                tone: "info",
-              }, () => controller.pickFolder());
-            }}
-          >
-            <FolderInput size={16} aria-hidden />
-            {state.fsaSupported ? "Choose a folder on this computer" : "Folder picker needs a Chromium browser"}
-          </button>
-          <p className="meta" style={{ margin: 0 }}>
-            Uses the File System Access API for reads and writes. Shell, git, and long-running processes still need the bridge
-            below.
-          </p>
-        </div>
-      </div>
+        <button
+          type="button"
+          className="btn primary block"
+          disabled={!state.fsaSupported}
+          onClick={() => {
+            void confirmed(controller, {
+              title: "Import a folder?",
+              message: "The browser will ask you to choose a folder. Kiln can read and edit files there. Shell and git still need the local bridge.",
+              confirmLabel: "Choose folder",
+              tone: "info",
+            }, () => controller.pickFolder());
+          }}
+        >
+          <FolderInput size={16} aria-hidden />
+          {state.fsaSupported ? "Choose a folder on this computer" : "Folder picker needs a Chromium browser"}
+        </button>
+        <p className="meta muted-note">
+          Uses the File System Access API for reads and writes. Shell, git, and long-running processes still need the bridge below.
+        </p>
+      </section>
 
-      <div className="dialog-section">
+      <section className="dialog-section">
         <div className="section-label">Open by path</div>
         <label className="field">
           <span>Absolute path to the project</span>
@@ -138,7 +138,7 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
             onChange={(event) => setRoot(event.target.value)}
           />
         </label>
-        <div className="dialog-actions" style={{ marginTop: 10 }}>
+        <div className="dialog-actions">
           <button type="button" className="btn" onClick={() => void controller.refreshBridge()}>
             <RefreshCw size={15} aria-hidden />
             Recheck bridge
@@ -160,7 +160,7 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
             Open path
           </button>
         </div>
-        <div className="status-row" style={{ marginTop: 8 }}>
+        <div className="status-row">
           <span className={`dot ${bridgeUp ? "ok" : "bad"}`} />
           <span className="truncate">
             {bridgeUp
@@ -168,25 +168,25 @@ export function ConnectionDialog({ state, controller }: { state: AppState; contr
               : state.bridge.error || "Bridge offline. Run npm run bridge, or pair the code below."}
           </span>
         </div>
-      </div>
+      </section>
 
-      <div className="dialog-section">
+      <section className="dialog-section">
         <div className="section-label">Pair a bridge on another machine</div>
         <label className="field">
           <span>Pairing code printed when the bridge starts</span>
-          <input value={code} onChange={(event) => setCode(event.target.value)} placeholder="6 characters from the bridge terminal" spellCheck={false} />
+          <input value={code} onChange={(event) => setCode(event.target.value)} placeholder="8 characters from the bridge terminal" spellCheck={false} />
         </label>
-        <div className="dialog-actions" style={{ marginTop: 10 }}>
+        <div className="dialog-actions">
           <button type="button" className="btn" onClick={() => void controller.pairDirect(code)} disabled={!code.trim()}>
             <Link2 size={15} aria-hidden />
             Pair this browser
           </button>
         </div>
-        <p className="meta" style={{ margin: "8px 0 0" }}>
-          <Plug size={12} aria-hidden style={{ verticalAlign: "-2px" }} /> A hosted Kiln cannot reach your computer on its own.
-          Start <code>npm run bridge</code> there, then paste the code it prints.
+        <p className="meta muted-note">
+          <Plug size={12} aria-hidden className="inline-icon" /> A hosted Kiln cannot reach your computer on its own. Start{" "}
+          <code>npm run bridge</code> there, then paste the code it prints.
         </p>
-      </div>
+      </section>
     </Dialog>
   );
 }

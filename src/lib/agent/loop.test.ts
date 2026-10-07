@@ -170,7 +170,41 @@ describe("agent loop", () => {
     const toolMessages = result.messages.filter((message) => message.role === "tool");
     expect(toolMessages.filter((message) => String(message.content ?? "").includes("repeated_failure"))).toHaveLength(1);
   });
+
+  it("explains an empty model reply instead of ending the turn in silence", async () => {
+    const model = new ScriptedModel([{ text: "" }]);
+    const run = harness(model, "full");
+    const result = await run.done;
+    expect(result.completed).toBe(true);
+    const assistantBlocks = run.transcript().blocks.filter((block) => block.kind === "assistant");
+    expect(assistantBlocks).toHaveLength(1);
+    expect(assistantBlocks[0]).toMatchObject({ kind: "assistant" });
+    expect((assistantBlocks[0] as { text: string }).text).toMatch(/empty reply/i);
+    expect((assistantBlocks[0] as { text: string }).text).toContain("scripted-1");
+  });
+
+  it("names reasoning-only replies so the user can act on them", async () => {
+    const model = new ReasonerModel();
+    const run = harness(model, "full");
+    const result = await run.done;
+    expect(result.completed).toBe(true);
+    const assistantBlocks = run.transcript().blocks.filter((block) => block.kind === "assistant");
+    expect(assistantBlocks).toHaveLength(1);
+    expect((assistantBlocks[0] as { text: string }).text).toMatch(/reasoning but no answer/i);
+  });
 });
+
+/** Streams thinking tokens and then closes without ever producing an answer. */
+class ReasonerModel extends ScriptedModel {
+  constructor() {
+    super([{ text: "" }]);
+  }
+
+  override async *streamChat(): AsyncIterable<import("@/lib/model/types").ModelStreamEvent> {
+    yield { type: "reasoning", text: "Let me think about this." };
+    yield { type: "done" };
+  }
+}
 
 function workspaceText(workspace: MemoryWorkspace): string {
   return workspace.files.get("src/math.js")?.content ?? "";

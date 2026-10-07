@@ -12,6 +12,9 @@ const EXAMPLES: { title: string; prompt: string; icon: LucideIcon }[] = [
 
 export function EmptyState({ state, onOpenProject }: { state: AppState; onOpenProject: () => void }) {
   const connected = state.workspace.kind !== "none";
+  const models = state.models.catalog?.models ?? [];
+  const firstModel = models[0];
+  const ready = connected && models.length > 0;
   return (
     <div className="empty">
       <h2 suppressHydrationWarning>{greeting()}</h2>
@@ -19,6 +22,26 @@ export function EmptyState({ state, onOpenProject }: { state: AppState; onOpenPr
         Kiln reads the project you open, then edits files and runs commands through a local bridge — and shows the diffs and the
         real output instead of describing them.
       </p>
+
+      {!ready ? (
+        <div className="readiness" role="status">
+          <span className="readiness-title">Before you send the first message</span>
+          <ul>
+            <li className={connected ? "done" : ""}>
+              <span className="tick" aria-hidden />
+              {connected ? `Project ready — ${state.workspace.label}` : "Open a project folder (Ctrl/⌘ O)"}
+            </li>
+            <li className={models.length ? "done" : ""}>
+              <span className="tick" aria-hidden />
+              {models.length
+                ? `${models.length} models loaded${firstModel ? ` — starts on ${firstModel.name}` : ""}`
+                : state.models.status === "loading"
+                  ? "Loading models from your providers…"
+                  : "Connect a provider in Settings → Providers"}
+            </li>
+          </ul>
+        </div>
+      ) : null}
 
       {connected ? (
         <div className="project-card connected">
