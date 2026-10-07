@@ -1,0 +1,48 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import type { AppController, AppState } from "@/lib/app/controller";
+
+export function Explorer({ state, controller }: { state: AppState; controller: AppController }) {
+  const [entries, setEntries] = useState<{ name: string; path: string; kind: string }[]>([]);
+  useEffect(() => {
+    if (!state.explorerOpen || state.workspace.kind === "none") return;
+    void controller.listRoot().then(setEntries);
+  }, [controller, state.explorerOpen, state.workspace.kind, state.workspace.root, state.running]);
+  if (!state.explorerOpen) return null;
+  return (
+    <aside className="explorer" aria-label="Project files">
+      <div className="brand">
+        <div>
+          <h1 style={{ fontSize: 18 }}>Project</h1>
+          <p>{state.workspace.label ?? "Not connected"}</p>
+        </div>
+      </div>
+      <div className="side-scroll">
+        {state.workspace.kind === "none" ? (
+          <p className="meta" style={{ padding: 8 }}>Connect a workspace to browse files. The chat stays the main surface.</p>
+        ) : (
+          entries.map((entry) => (
+            <button key={entry.path} type="button" className="file-row" onClick={() => entry.kind === "file" && void controller.openPreview(entry.path)}>
+              <span className="meta">{entry.kind === "directory" ? "dir" : "file"}</span>
+              <span>{entry.name}</span>
+            </button>
+          ))
+        )}
+        {state.previewPath ? (
+          <div className="card" style={{ margin: 8 }}>
+            <div className="card-head">
+              <span className="name">{state.previewPath}</span>
+              <button type="button" className="icon-btn" onClick={() => controller.closePreview()} aria-label="Close preview">
+                ×
+              </button>
+            </div>
+            <div className="card-body">
+              {state.previewError ? <p>{state.previewError}</p> : <div className="terminal">{state.previewText}</div>}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
