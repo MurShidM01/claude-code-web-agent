@@ -81,9 +81,9 @@ export function CommandPalette({ state, controller }: { state: AppState; control
                 controller.setPalette(false);
               }}
             >
-              <span>
-                {item.label}
-                {"detail" in item && item.detail ? <span className="meta"><br />{item.detail}</span> : null}
+              <span className="menu-item-copy">
+                <span className="menu-item-label">{item.label}</span>
+                {"detail" in item && item.detail ? <span className="menu-item-desc">{item.detail}</span> : null}
               </span>
             </button>
           ))}

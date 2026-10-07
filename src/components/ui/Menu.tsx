@@ -143,16 +143,11 @@ export function Menu({
                     onMouseEnter={() => setActive(index)}
                     onClick={() => choose(option.id)}
                   >
-                    <span>
-                      {option.label}
-                      {option.description ? (
-                        <span className="meta">
-                          <br />
-                          {option.description}
-                        </span>
-                      ) : null}
+                    <span className="menu-item-copy">
+                      <span className="menu-item-label">{option.label}</span>
+                      {option.description ? <span className="menu-item-desc">{option.description}</span> : null}
                     </span>
-                    {selected ? <Check size={14} aria-hidden style={{ marginLeft: "auto", flex: "none", color: "var(--accent)" }} /> : null}
+                    {selected ? <Check size={14} aria-hidden className="menu-item-check" /> : null}
                   </button>
                 );
               })}

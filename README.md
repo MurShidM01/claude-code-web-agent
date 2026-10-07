@@ -25,6 +25,8 @@ A remote deployment cannot access your computer. Shell, git, and process control
 4. File and command tools go through a workspace port. In local mode that port is the bridge, reached via `/api/bridge` so the pairing token stays on the machine. In deploy mode the same port is a bridge you pair directly.
 5. Denials, missing capabilities, and command failures return structured tool results. The agent is expected to adapt, not to invent a success. If the model repeats the same failing tool call three times in a row, the loop refuses it and ends the turn with an explanation.
 
+A turn never ends without a visible reason. An empty stream, a reasoning-only reply, an unknown model id, or an unreachable provider each produce a plain sentence in the transcript, and a failed turn also raises a dialog and a log line in Settings → Diagnostics. A model from a connected account is never quietly retried on Puter.
+
 The bridge speaks a versioned JSON protocol. Paths are resolved inside the workspace root, shell output is capped, the process environment is filtered, and commands such as `rm -rf /` are rejected before spawn. Writes are atomic (staged in a temp file, then renamed), and stopping the bridge also stops the commands it started.
 
 ## Layout
@@ -47,4 +49,6 @@ npm test
 npm run typecheck
 ```
 
-The tests cover permission decisions, tool schemas, path escape, the agent loop (including deny, retry, cancel, and the repeated-failure breaker), the folder-picker workspace's typed errors (including creating a new file), the file tools (`Write`, `Edit`, `MultiEdit`, `Stat`, `BashOutput`), the real bridge (atomic writes, typed `not_found` errors, move, delete, search), and a flow that loads a model catalog, connects a workspace, edits a file, runs a command, and persists the theme.
+The tests cover permission decisions, tool schemas, path escape, the agent loop (including deny, retry, cancel, the repeated-failure breaker, and empty or reasoning-only replies), the folder-picker workspace's typed errors (including creating a new file), the file tools (`Write`, `Edit`, `MultiEdit`, `Stat`, `BashOutput`), the real bridge (atomic writes, typed `not_found` errors, move, delete, search), and a flow that loads a model catalog, connects a workspace, edits a file, runs a command, and persists the theme.
+
+`src/lib/providers/chat-roundtrip.test.ts` additionally drives the whole bridged path — controller → routed transport → `/api/bridge/chat` → bridge → upstream SSE — against a stand-in provider, so request shaping and the SSE decoder are covered end to end. The interface has its own tests for the settings dialog, the model picker's provider filters, and the sidebar's truncation rules.
