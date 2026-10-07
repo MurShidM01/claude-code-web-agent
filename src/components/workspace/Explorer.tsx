@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { FileText, Folder, FolderOpen, X } from "lucide-react";
 import type { AppController, AppState } from "@/lib/app/controller";
 
 export function Explorer({ state, controller }: { state: AppState; controller: AppController }) {
@@ -12,11 +13,21 @@ export function Explorer({ state, controller }: { state: AppState; controller: A
   if (!state.explorerOpen) return null;
   return (
     <aside className="explorer" aria-label="Project files">
-      <div className="brand">
-        <div>
-          <h1 style={{ fontSize: 18 }}>Project</h1>
+      <div className="panel-head">
+        <FolderOpen size={18} aria-hidden style={{ color: "var(--accent-ink)", flex: "none" }} />
+        <div className="panel-title">
+          <h1>Project</h1>
           <p>{state.workspace.label ?? "Not connected"}</p>
         </div>
+        <button
+          type="button"
+          className="icon-btn ghost"
+          onClick={() => controller.toggleExplorer()}
+          aria-label="Close file panel"
+          title="Close file panel"
+        >
+          <X size={17} aria-hidden />
+        </button>
       </div>
       <div className="side-scroll">
         {state.workspace.kind === "none" ? (
@@ -24,8 +35,8 @@ export function Explorer({ state, controller }: { state: AppState; controller: A
         ) : (
           entries.map((entry) => (
             <button key={entry.path} type="button" className="file-row" onClick={() => entry.kind === "file" && void controller.openPreview(entry.path)}>
-              <span className="meta">{entry.kind === "directory" ? "dir" : "file"}</span>
-              <span>{entry.name}</span>
+              {entry.kind === "directory" ? <Folder size={15} aria-hidden /> : <FileText size={15} aria-hidden />}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</span>
             </button>
           ))
         )}
@@ -33,8 +44,9 @@ export function Explorer({ state, controller }: { state: AppState; controller: A
           <div className="card" style={{ margin: 8 }}>
             <div className="card-head">
               <span className="name">{state.previewPath}</span>
-              <button type="button" className="icon-btn" onClick={() => controller.closePreview()} aria-label="Close preview">
-                ×
+              <span className="spacer" />
+              <button type="button" className="icon-btn ghost" onClick={() => controller.closePreview()} aria-label="Close preview" title="Close preview">
+                <X size={15} aria-hidden />
               </button>
             </div>
             <div className="card-body">

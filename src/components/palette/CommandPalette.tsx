@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Search } from "lucide-react";
 import type { AppController, AppState } from "@/lib/app/controller";
 
 export function CommandPalette({ state, controller }: { state: AppState; controller: AppController }) {
@@ -36,21 +37,25 @@ export function CommandPalette({ state, controller }: { state: AppState; control
   return (
     <div className="backdrop" onMouseDown={(event) => event.target === event.currentTarget && controller.setPalette(false)}>
       <div className="palette" role="dialog" aria-label="Command palette">
-        <input
-          autoFocus
-          placeholder="Search commands and conversations"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") controller.setPalette(false);
-            if (event.key === "ArrowDown") setActive((index) => Math.min(items.length - 1, index + 1));
-            if (event.key === "ArrowUp") setActive((index) => Math.max(0, index - 1));
-            if (event.key === "Enter" && items[active]) {
-              items[active]!.run();
-              controller.setPalette(false);
-            }
-          }}
-        />
+        <div className="palette-input">
+          <Search size={16} aria-hidden />
+          <input
+            autoFocus
+            placeholder="Search commands and conversations"
+            aria-label="Search commands and conversations"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") controller.setPalette(false);
+              if (event.key === "ArrowDown") setActive((index) => Math.min(items.length - 1, index + 1));
+              if (event.key === "ArrowUp") setActive((index) => Math.max(0, index - 1));
+              if (event.key === "Enter" && items[active]) {
+                items[active]!.run();
+                controller.setPalette(false);
+              }
+            }}
+          />
+        </div>
         <div style={{ maxHeight: 360, overflow: "auto", padding: 6 }}>
           {items.map((item, index) => (
             <button

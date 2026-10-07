@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Check, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -81,15 +82,17 @@ function Pre({ children }: { children: React.ReactNode }) {
       <button
         type="button"
         className="copy"
+        aria-label="Copy code"
+        title={copied ? "Copied" : "Copy code"}
         onClick={(event) => {
-          const text = (event.currentTarget.parentElement?.innerText ?? "").replace(/^Copy$|^Copied$/, "").trim();
+          const text = (event.currentTarget.parentElement?.innerText ?? "").trim();
           void navigator.clipboard.writeText(text).then(() => {
             setCopied(true);
             setTimeout(() => setCopied(false), 1200);
           });
         }}
       >
-        {copied ? "Copied" : "Copy"}
+        {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
       </button>
       {children}
     </pre>

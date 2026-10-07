@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { Folder, FolderOpen, Menu } from "lucide-react";
 import { DiffCard, PlanCard, QuestionCard, ToolCard } from "@/components/activity/Cards";
 import { ConnectionDialog } from "@/components/bridge/ConnectionDialog";
 import { Composer } from "@/components/chat/Composer";
@@ -70,11 +71,13 @@ function Shell() {
   const className = `app${state.sidebarOpen ? "" : " sidebar-closed"}${state.explorerOpen ? " with-explorer" : ""}`;
   return (
     <div className={className}>
+      {state.sidebarOpen ? <div className="scrim" aria-hidden onClick={() => controller.toggleSidebar()} /> : null}
       <Sidebar
         state={state}
         onNew={() => controller.newConversation()}
         onSelect={(id) => controller.selectConversation(id)}
         onDelete={(id) => void controller.deleteConversation(id)}
+        onClose={() => controller.toggleSidebar()}
         mode={mode}
         onMode={(next) => controller.setPermissionMode(next as PermissionMode)}
         onTheme={(theme) => controller.setTheme(theme)}
@@ -86,18 +89,33 @@ function Shell() {
       />
       <main className="stage">
         <header className="topbar">
-          <button type="button" className="icon-btn" aria-label="Toggle sidebar" onClick={() => controller.toggleSidebar()}>
-            ≡
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={state.sidebarOpen ? "Close sidebar" : "Open sidebar"}
+            aria-expanded={state.sidebarOpen}
+            title="Toggle sidebar (Ctrl/⌘ B)"
+            onClick={() => controller.toggleSidebar()}
+          >
+            <Menu size={17} aria-hidden />
           </button>
           <h2>{active?.title ?? "Kiln"}</h2>
-          <div className={`phase ${running ? "live" : ""}`}>
+          <div className={`phase ${running ? "live" : ""}`} title={state.phaseDetail}>
             <i />
-            {PHASE_LABEL[state.phase]}
+            <span className="phase-text">{PHASE_LABEL[state.phase]}</span>
             <span className="meta">{state.phaseDetail}</span>
           </div>
           <div className="spacer" />
-          <button type="button" className="chip" onClick={() => controller.toggleExplorer()}>
-            Files
+          <button
+            type="button"
+            className="chip"
+            aria-pressed={state.explorerOpen}
+            aria-label="Toggle file panel"
+            title="Toggle file panel (Ctrl/⌘ \)"
+            onClick={() => controller.toggleExplorer()}
+          >
+            {state.explorerOpen ? <FolderOpen size={15} aria-hidden /> : <Folder size={15} aria-hidden />}
+            <span className="hide-sm">Files</span>
           </button>
         </header>
         <div className="thread">
@@ -150,6 +168,7 @@ function Shell() {
         </div>
         <Composer state={state} controller={controller} permissionMode={mode} modelId={active?.modelId ?? null} />
       </main>
+      {state.explorerOpen ? <div className="scrim" aria-hidden onClick={() => controller.toggleExplorer()} /> : null}
       <Explorer state={state} controller={controller} />
       <PermissionDialog request={state.permission} onDecide={(granted, remember) => controller.decidePermission(granted, remember)} />
       <SettingsDialog state={state} controller={controller} />

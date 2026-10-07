@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronDown, Cpu, RefreshCw } from "lucide-react";
 import { groupModels, queryModels, type ModelSort } from "@/lib/model/catalog";
 import type { AppState } from "@/lib/app/controller";
 
@@ -56,15 +57,27 @@ export function ModelPicker({
 
   return (
     <div ref={root} style={{ position: "relative" }}>
-      <button type="button" className="chip" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((value) => !value)}>
-        <strong>{selected?.name ?? (state.models.status === "loading" ? "Loading models" : "Choose model")}</strong>
+      <button
+        type="button"
+        className="chip"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listId}
+        title={selected ? `${selected.name} (${selected.id})` : "Choose model"}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Cpu size={14} aria-hidden />
+        <span className="chip-label">
+          <strong>{selected?.name ?? (state.models.status === "loading" ? "Loading models" : "Choose model")}</strong>
+        </span>
+        <ChevronDown size={13} className="chev" aria-hidden />
       </button>
       {open ? (
         <div
           className="popover"
           id={listId}
           role="listbox"
-          style={{ left: 0, bottom: "calc(100% + 8px)", width: 380 }}
+          style={{ left: 0, bottom: "calc(100% + 8px)", width: "min(380px, calc(100vw - 48px))" }}
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
             if (event.key === "ArrowDown") setActive((index) => Math.min(flat.length - 1, index + 1));
@@ -86,7 +99,10 @@ export function ModelPicker({
             <button type="button" className="chip" aria-pressed={state.models.sort === "name"} onClick={() => onSort("name")}>Name</button>
             <button type="button" className="chip" aria-pressed={state.models.sort === "provider"} onClick={() => onSort("provider")}>Provider</button>
             <button type="button" className="chip" aria-pressed={state.models.sort === "context"} onClick={() => onSort("context")}>Context</button>
-            <button type="button" className="chip" onClick={onRefresh}>Refresh</button>
+            <button type="button" className="chip" onClick={onRefresh} aria-label="Refresh model catalog" title="Refresh model catalog">
+              <RefreshCw size={13} aria-hidden />
+              <span className="hide-sm">Refresh</span>
+            </button>
           </div>
           <div className="seg" style={{ padding: "0 6px 6px" }}>
             <button type="button" className="chip" aria-pressed={state.models.provider === "all"} onClick={() => onProvider("all")}>All</button>
