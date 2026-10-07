@@ -33,7 +33,28 @@ Useful scripts:
 | `npm test` | Unit, integration, and flow tests |
 | `npm run extract-commands` | Refresh `src/content/catalog.json` from `plugins/` |
 
-The bridge prints a pairing code. Local mode does not need it, because the app reads `.kiln/bridge.json`. Deploy mode does: open Connect a workspace, enter the code, then choose the path. The token file is mode `0600` and is gitignored.
+The bridge prints a pairing code. Local mode does not need it, because the app reads `.kiln/bridge.json`. Deploy mode does: open a project, enter the code, then choose the path. The token file is mode `0600` and is gitignored.
+
+## Open a project
+
+The agent works inside one project folder. Open it from any of these, all of which open the same dialog:
+
+- The project row at the top of the sidebar.
+- The project chip in the topbar, or in the composer bar.
+- The card in the empty state, or the notice above the composer when nothing is open.
+- The file panel, the command palette, or Cmd/Ctrl+O.
+
+The dialog lists the projects you have connected before, so reopening is one click. A bridge that already has a project selected is adopted on load, so a local Kiln comes back up connected instead of asking again.
+
+Three ways to connect:
+
+| Method | Files | Shell and git |
+| --- | --- | --- |
+| Path on this machine | Yes | Yes, through the bridge |
+| Folder picker (Chromium) | Yes | No |
+| Paired remote bridge | Yes | Yes, on that machine |
+
+Recent projects and folder handles are stored in this browser. Nothing is uploaded, and a folder handle never works in a different browser or profile.
 
 ## Deploy
 
@@ -62,4 +83,4 @@ Conversation titles, messages, and compact tool cards live in IndexedDB in this 
 
 ## Shortcuts
 
-Enter sends. Shift+Enter adds a line. Escape stops the turn. Cmd/Ctrl+B toggles the sidebar. Cmd/Ctrl+K opens the palette. Cmd/Ctrl+\\ toggles the file panel. Cmd/Ctrl+, opens settings. Cmd/Ctrl+Shift+M opens the model picker.
+Enter sends. Shift+Enter adds a line. Escape stops the turn. Cmd/Ctrl+O opens a project. Cmd/Ctrl+B toggles the sidebar. Cmd/Ctrl+K opens the palette. Cmd/Ctrl+\\ toggles the file panel. Cmd/Ctrl+, opens settings. Cmd/Ctrl+Shift+M opens the model picker.

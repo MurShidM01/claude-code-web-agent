@@ -11,7 +11,7 @@ npm install
 npm run dev:all
 ```
 
-Open `http://localhost:3000`. Sign in, choose a model from the catalog Puter returns, and confirm the suggested workspace (`sample-project` when you use `dev:all`). Ask Kiln to fix the failing test.
+Open `http://localhost:3000`. Sign in, choose a model from the catalog Puter returns, and open a project (`sample-project` when you use `dev:all`) from the project row in the sidebar, the topbar chip, or Cmd/Ctrl+O. Ask Kiln to fix the failing test.
 
 `npm run dev` starts only the website. `npm run bridge` starts only the execution bridge. Details, including how a hosted app pairs with a bridge on your machine, are in [`docs/using-kiln.md`](docs/using-kiln.md).
 

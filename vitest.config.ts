@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   esbuild: { jsx: "automatic" },
   test: {
+    globals: true,
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "bridge/**/*.test.ts"],
     setupFiles: ["src/test/setup.ts"],

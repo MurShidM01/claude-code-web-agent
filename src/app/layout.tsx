@@ -2,15 +2,20 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kiln",
-  description: "A conversational coding agent for a selected local project. Inspired by Claude Code workflows, with an original interface.",
+  title: { default: "Kiln", template: "%s · Kiln" },
+  description:
+    "A conversational coding agent for a local project. Open a folder, describe the work, and get real edits, diffs, and command output.",
+  applicationName: "Kiln",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#f3efe6",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#faf9f5" },
+    { media: "(prefers-color-scheme: dark)", color: "#181715" },
+  ],
 };
 
 const themeBoot = `(() => { try { var t = localStorage.getItem('kiln.theme') || 'system'; var d = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches); document.documentElement.classList.toggle('dark', d); document.documentElement.dataset.theme = t; } catch (e) {} })();`;
