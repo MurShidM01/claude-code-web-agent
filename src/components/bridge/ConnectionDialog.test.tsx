@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConnectionDialog } from "@/components/bridge/ConnectionDialog";
@@ -25,6 +25,7 @@ function setup(overrides: { state?: Partial<AppState> } = {}) {
     refreshBridge: vi.fn(),
     pairDirect: vi.fn(),
     closeWorkspace: vi.fn(),
+    requestConfirm: vi.fn(async () => true),
   } as unknown as AppController & Record<string, ReturnType<typeof vi.fn>>;
   render(<ConnectionDialog state={{ ...baseState, ...overrides.state } as AppState} controller={controller} />);
   return controller;
@@ -35,7 +36,7 @@ describe("open a project dialog", () => {
     const controller = setup();
     expect(screen.getByRole("dialog")).toHaveTextContent("Recent projects");
     await userEvent.click(screen.getByRole("button", { name: /api/i }));
-    expect(controller.openWorkspace).toHaveBeenCalledWith("bridge:/work/api");
+    await waitFor(() => expect(controller.openWorkspace).toHaveBeenCalledWith("bridge:/work/api"));
   });
 
   it("disables a bridge path when the bridge is offline and says why", () => {
@@ -54,7 +55,7 @@ describe("open a project dialog", () => {
     const controller = setup();
     await userEvent.type(screen.getByPlaceholderText("/path/to/project"), "/work/api");
     await userEvent.click(screen.getByRole("button", { name: /Open path/i }));
-    expect(controller.selectBridgeWorkspace).toHaveBeenCalledWith("/work/api");
+    await waitFor(() => expect(controller.selectBridgeWorkspace).toHaveBeenCalledWith("/work/api"));
   });
 
   it("can close the project that is already open", async () => {
@@ -63,7 +64,7 @@ describe("open a project dialog", () => {
     });
     expect(screen.getByRole("dialog")).toHaveTextContent("Current project");
     await userEvent.click(screen.getByRole("button", { name: /Close project/i }));
-    expect(controller.closeWorkspace).toHaveBeenCalled();
+    await waitFor(() => expect(controller.closeWorkspace).toHaveBeenCalled());
   });
 
   it("falls back to the folder picker when this browser has no File System Access API", () => {

@@ -9,6 +9,8 @@ export function Dialog({
   onClose,
   labelledBy = "dialog-title",
   wide = false,
+  layout = "default",
+  priority = "default",
 }: {
   open: boolean;
   title: string;
@@ -16,6 +18,8 @@ export function Dialog({
   onClose?: () => void;
   labelledBy?: string;
   wide?: boolean;
+  layout?: "default" | "settings" | "alert";
+  priority?: "default" | "front";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   /* Callers pass an inline handler. Keeping it in a ref stops this effect from
@@ -32,6 +36,8 @@ export function Dialog({
     target?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && onCloseRef.current) {
+        const backdrop = node?.parentElement;
+        if (document.querySelector(".backdrop.front") && !backdrop?.classList.contains("front")) return;
         event.preventDefault();
         onCloseRef.current();
       }
@@ -57,9 +63,9 @@ export function Dialog({
 
   if (!open) return null;
   return (
-    <div className="backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
-      <div className={`dialog${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1} ref={ref}>
-        <h3 id={labelledBy}>{title}</h3>
+    <div className={`backdrop${priority === "front" ? " front" : ""}`} onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
+      <div className={`dialog${wide ? " wide" : ""}${layout === "settings" ? " settings" : ""}${layout === "alert" ? " alert" : ""}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1} ref={ref}>
+        <h3 id={labelledBy} className={layout === "settings" || layout === "alert" ? "sr-only" : undefined}>{title}</h3>
         {children}
       </div>
     </div>

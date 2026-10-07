@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ChevronDown, Cpu, RefreshCw } from "lucide-react";
+import { AudioLines, Brain, ChevronDown, Cpu, Eye, RefreshCw, Wrench } from "lucide-react";
 import { groupModels, queryModels, type ModelSort } from "@/lib/model/catalog";
 import type { AppState } from "@/lib/app/controller";
 
@@ -113,12 +113,12 @@ export function ModelPicker({
             ))}
           </div>
           {state.models.status === "error" ? <p className="meta" style={{ padding: 8 }}>{state.models.error}</p> : null}
-          {state.models.status === "idle" ? <p className="meta" style={{ padding: 8 }}>Sign in with Puter to load the live model catalog.</p> : null}
+          {state.models.status === "idle" ? <p className="meta" style={{ padding: 8 }}>Connect a provider in Settings to load models. Nothing is hardcoded.</p> : null}
           {state.models.status === "ready" && flat.length === 0 ? (
             <p className="meta" style={{ padding: 8 }}>
               {state.auth.status === "signed-in"
                 ? "No models match. The catalog is live — nothing is hardcoded."
-                : "The live catalog is empty. Sign in with Puter, then refresh."}
+                : "The live catalog is empty. Connect a provider in Settings, then refresh."}
             </p>
           ) : null}
           {groups.map((group) => (
@@ -141,12 +141,17 @@ export function ModelPicker({
                   >
                     <span>
                       {model.name}
+                      <span className="cap-inline" aria-hidden>
+                        {model.capabilities.some((cap) => /vision/i.test(cap)) ? <Eye size={12} /> : null}
+                        {model.capabilities.some((cap) => /tool|function/i.test(cap)) ? <Wrench size={12} /> : null}
+                        {model.capabilities.some((cap) => /reason/i.test(cap)) ? <Brain size={12} /> : null}
+                        {model.capabilities.some((cap) => /stream/i.test(cap)) ? <AudioLines size={12} /> : null}
+                      </span>
                       <span className="meta">
                         <br />
                         {model.id}
                         {model.contextWindow ? ` · ${Math.round(model.contextWindow / 1000)}k context` : ""}
                         {model.cost?.input != null ? ` · in ${model.cost.input}` : ""}
-                        {model.capabilities.length ? ` · ${model.capabilities.slice(0, 3).join(", ")}` : ""}
                       </span>
                     </span>
                   </button>

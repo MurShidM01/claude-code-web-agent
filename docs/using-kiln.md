@@ -20,7 +20,7 @@ npm install
 npm run dev:all
 ```
 
-That starts the bridge on `127.0.0.1:3939` and the app on `http://localhost:3000`, suggesting `sample-project` as the workspace. Open the app, sign in with Puter, choose a model from the live catalog, and confirm the workspace path.
+That starts the bridge on `127.0.0.1:3939` and the app on `http://localhost:3000`, suggesting `sample-project` as the workspace. Open the app, connect a provider, choose a model from the live catalog, and confirm the workspace path.
 
 Useful scripts:
 
@@ -66,6 +66,17 @@ npm start
 Set `KILN_BRIDGE_TOKEN_FILE` only on a machine that should proxy to a local bridge. Do not commit `.kiln/` or `.env`. Kiln has no model API key of its own. Model calls go through Puter.js in the browser and are billed to the signed-in Puter user.
 
 A hosted Kiln cannot see the visitor's computer. To edit a local project from a hosted app, the visitor runs `npm run bridge` on that computer and pairs the browser with the code the bridge prints.
+
+## Providers
+
+Settings → Providers. Tokens and keys stay in this browser. When the local bridge is connected, provider calls leave from your computer. Otherwise they are proxied by the Kiln server you are using.
+
+- **Puter.** Browser sign-in. Models come from `puter.ai.listModels()`.
+- **OpenAI Code.** Opens the account chooser at `https://auth.openai.com`. The authorize and token URLs are read from the provider’s OpenID configuration. After sign-in, models are fetched from the account — Kiln does not ship a model list. The callback is `http://localhost:1455/auth/callback` (or 1457), so this computer must be running Kiln or the bridge.
+- **Kiro.** AWS Builder ID or Identity Center device login. The OAuth client is registered with AWS at sign-in, not baked in. Models come from `ListAvailableModels`. Region defaults to the Builder ID home (`us-east-1`) and can be changed. Enterprise start URLs are typed, not assumed.
+- **Custom.** Base URL, API key, and an endpoint: auto, chat completions, messages, or responses. Models are probed at the provider’s models URL. If that list is empty, add a model id and set streaming, reasoning, vision, and tool calling yourself.
+
+The composer icons turn vision, tool calling, reasoning, and streaming on or off for the next turn. A model that did not report a capability stays off until you enable it on that model.
 
 ## Permission modes
 

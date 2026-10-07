@@ -5,6 +5,8 @@ export interface UserBlock {
   kind: "user";
   text: string;
   attachments?: { name: string; mediaType: string }[];
+  /** How many model messages existed before this turn. Used to retry or edit without replaying later turns. */
+  historyLength?: number;
 }
 
 export interface AssistantBlock {
@@ -12,6 +14,7 @@ export interface AssistantBlock {
   kind: "assistant";
   text: string;
   streaming: boolean;
+  reasoning?: string;
 }
 
 export interface ToolBlock {
@@ -100,6 +103,17 @@ export function reduceEvent(state: TranscriptState, event: AgentEvent): Transcri
       } else {
         const current = blocks[index] as AssistantBlock;
         blocks[index] = { ...current, text: current.text + event.delta, streaming: true };
+      }
+      return { ...state, blocks };
+    }
+    case "assistant_reasoning_delta": {
+      const blocks = [...state.blocks];
+      const index = blocks.findIndex((block) => block.kind === "assistant" && block.id === event.messageId);
+      if (index === -1) {
+        blocks.push({ id: event.messageId, kind: "assistant", text: "", streaming: true, reasoning: event.delta });
+      } else {
+        const current = blocks[index] as AssistantBlock;
+        blocks[index] = { ...current, reasoning: `${current.reasoning ?? ""}${event.delta}`, streaming: true };
       }
       return { ...state, blocks };
     }

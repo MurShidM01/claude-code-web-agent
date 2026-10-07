@@ -21,7 +21,7 @@ export function phaseForTool(name: string, input: Record<string, unknown>): Phas
     const kind = String(input.subagent_type ?? "explore");
     return kind === "plan" ? "planning" : "inspecting";
   }
-  if (name === "Write" || name === "Edit" || name === "MultiEdit" || name === "Delete" || name === "Move" || name === "NotebookEdit") {
+  if (name === "Write" || name === "Edit" || name === "MultiEdit" || name === "Delete" || name === "Move" || name === "NotebookEdit" || name === "MemoryWrite" || name === "Mkdir") {
     return "editing";
   }
   if (name === "Bash" || name === "PowerShell" || name === "TaskStop" || name === "BashOutput") {

@@ -1,15 +1,20 @@
 "use client";
 
+import { AlertDialog } from "@/components/ui/AlertDialog";
+
 export default function AppError({ error, reset }: { error: Error; reset: () => void }) {
   return (
-    <main className="dialog" role="alert" style={{ margin: 24 }}>
-      <h3>Kiln hit an unexpected error</h3>
-      <p>{error.message}</p>
-      <div className="dialog-actions">
-        <button type="button" className="btn primary" onClick={reset}>
+    <AlertDialog
+      open
+      title="Kiln hit an unexpected error"
+      message={error.message}
+      tone="danger"
+      onClose={reset}
+      actions={
+        <button type="button" className="btn primary" data-autofocus onClick={reset}>
           Try again
         </button>
-      </div>
-    </main>
+      }
+    />
   );
 }

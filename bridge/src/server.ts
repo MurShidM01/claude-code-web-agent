@@ -4,6 +4,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { closeAuthListener, handleProviderRequest } from "../../src/lib/providers/server";
 import { PROTOCOL_VERSION } from "../../src/lib/protocol/errors";
 import { BridgeError } from "../../src/lib/protocol/errors";
 import { paramSchema, rpcRequest } from "../../src/lib/protocol/schema";
@@ -85,6 +86,10 @@ export async function startBridge(options: Partial<BridgeOptions> = {}): Promise
         return;
       }
       await requireAuth(req, token);
+      if (pathname.startsWith("/v1/oauth") || pathname.startsWith("/v1/providers") || pathname === "/v1/models" || pathname === "/v1/chat") {
+        await serveProvider(req, res, url, pathname);
+        return;
+      }
       if (req.method === "POST" && pathname === "/v1/workspace") {
         const body = await readBody(req);
         const root = String(body.root ?? "");
@@ -162,12 +167,15 @@ export async function startBridge(options: Partial<BridgeOptions> = {}): Promise
         // Stop spawned commands first so nothing outlives the bridge, then
         // destroy open connections — server.close() alone waits on keep-alive
         // and streaming sockets and would hang shutdown.
-        for (const proc of processes.values()) {
-          if (proc.running) killTree(proc.child);
-        }
-        for (const socket of sockets) socket.destroy();
-        server.close(() => resolve());
-        setTimeout(resolve, 1_000).unref();
+        void (async () => {
+          await closeAuthListener().catch(() => undefined);
+          for (const proc of processes.values()) {
+            if (proc.running) killTree(proc.child);
+          }
+          for (const socket of sockets) socket.destroy();
+          server.close(() => resolve());
+          setTimeout(resolve, 1_000).unref();
+        })();
       }),
   };
 }
@@ -189,6 +197,8 @@ async function dispatch(
   switch (method) {
     case "readFile":
       return readWorkspaceFile(ctx.root, String(params.path), numberOr(params.offset), numberOr(params.limit));
+    case "readBinary":
+      return readWorkspaceBinary(ctx.root, String(params.path), numberOr(params.maxBytes) ?? 6_000_000);
     case "writeFile":
       return writeWorkspaceFile(ctx.root, String(params.path), String(params.content ?? ""));
     case "deleteFile":
@@ -244,6 +254,29 @@ async function jail(root: string, input: string): Promise<string> {
     }
     return native;
   }
+}
+
+async function readWorkspaceBinary(root: string, input: string, maxBytes: number) {
+  const target = await jail(root, input);
+  const st = await stat(target).catch(() => null);
+  if (!st) throw new BridgeError("not_found", `No such file: ${input}`);
+  if (st.isDirectory()) throw new BridgeError("not_a_file", "Path is a directory.");
+  if (st.size > maxBytes) throw new BridgeError("output_limit", `Image is ${st.size} bytes, over the ${maxBytes} byte limit.`);
+  const raw = await readFile(target);
+  return {
+    mediaType: mediaTypeFor(target),
+    base64: raw.toString("base64"),
+    bytes: raw.length,
+  };
+}
+
+function mediaTypeFor(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".svg") return "image/svg+xml";
+  return "image/jpeg";
 }
 
 async function readWorkspaceFile(root: string, input: string, offset?: number, limit?: number) {
@@ -718,17 +751,36 @@ function makeCode(): string {
   return [...bytes].map((byte) => alphabet[byte % alphabet.length]).join("");
 }
 
+async function serveProvider(req: IncomingMessage, res: ServerResponse, url: URL, pathname: string) {
+  const body = req.method === "GET" || req.method === "HEAD" ? {} : await readBody(req, 16_000_000);
+  const result = await handleProviderRequest({
+    method: req.method || "GET",
+    pathname: pathname.replace(/^\/v1/, "") || "/",
+    searchParams: url.searchParams,
+    body,
+  });
+  if (result.kind === "json") {
+    sendJson(res, result.status, result.body);
+    return;
+  }
+  res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store" });
+  for await (const event of result.events) {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  res.end();
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readBody(req: IncomingMessage, max = MAX_BODY): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new BridgeError("output_limit", "Request body is too large.");
+    if (size > max) throw new BridgeError("output_limit", "Request body is too large.");
     chunks.push(chunk as Buffer);
   }
   if (!chunks.length) return {};

@@ -33,6 +33,21 @@ export class FileSystemAccessWorkspace implements WorkspacePort {
     return { root: this.handle.name, name: this.handle.name };
   }
 
+  async readBinary(filePath: string, maxBytes = 6_000_000) {
+    const file = await this.file(filePath, false);
+    const blob = await file.getFile();
+    if (blob.size > maxBytes) {
+      throw new BridgeError("output_limit", `Image is ${blob.size} bytes, over the ${maxBytes} byte limit.`);
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    const chunk = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+    }
+    return { mediaType: blob.type || mediaTypeFor(filePath), base64: btoa(binary), bytes: bytes.length };
+  }
+
   async readFile(filePath: string, offset?: number, limit?: number): Promise<FileReadResult> {
     try {
       const file = await this.file(filePath, false);
@@ -327,6 +342,15 @@ export class FileSystemAccessWorkspace implements WorkspacePort {
     const { parent, name } = await this.parent(filePath, create);
     return parent.getFileHandle(name, { create });
   }
+}
+
+function mediaTypeFor(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "gif") return "image/gif";
+  if (ext === "webp") return "image/webp";
+  if (ext === "svg") return "image/svg+xml";
+  return "image/jpeg";
 }
 
 async function writeToHandle(handle: FileSystemFileHandle, data: string | Blob): Promise<void> {

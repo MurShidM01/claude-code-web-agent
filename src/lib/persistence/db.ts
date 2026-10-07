@@ -1,6 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { PermissionMode } from "@/lib/permissions/types";
-import { DEFAULT_SETTINGS, type Settings } from "@/lib/persistence/settings";
+import { DEFAULT_SETTINGS, normalizeSettings, type Settings } from "@/lib/persistence/settings";
 
 export interface PersistedBlock {
   id: string;
@@ -58,7 +58,7 @@ export class MemoryPersistence implements Persistence {
   handles = new Map<string, FileSystemDirectoryHandle>();
 
   async loadSettings() {
-    return this.settings;
+    return normalizeSettings(this.settings);
   }
   async saveSettings(settings: Settings) {
     this.settings = settings;
@@ -106,7 +106,7 @@ export class IndexedDbPersistence implements Persistence {
 
   async loadSettings() {
     const db = await this.db();
-    return (await db.get("settings", "app")) ?? { ...DEFAULT_SETTINGS };
+    return normalizeSettings((await db.get("settings", "app")) ?? { ...DEFAULT_SETTINGS });
   }
 
   async saveSettings(settings: Settings) {

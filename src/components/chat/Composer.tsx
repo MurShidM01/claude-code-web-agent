@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, FolderOpen, FolderPlus, Paperclip, PencilLine, ShieldQuestion, Square, X, Zap } from "lucide-react";
+import { ArrowUp, AudioLines, Brain, Eye, FolderOpen, FolderPlus, Paperclip, PencilLine, ShieldQuestion, Square, Wrench, X, Zap } from "lucide-react";
 import { ModelPicker } from "@/components/model/ModelPicker";
 import { Menu } from "@/components/ui/Menu";
 import type { AppController, AppState } from "@/lib/app/controller";
+import { confirmed } from "@/components/ui/AlertDialog";
+import { findModel } from "@/lib/model/catalog";
+import { modelAllows } from "@/lib/providers/discover";
 import { PERMISSION_MODE_LABEL, type PermissionMode } from "@/lib/permissions/types";
 
 const MODE_ICON: Record<PermissionMode, typeof ShieldQuestion> = {
@@ -38,6 +41,13 @@ export function Composer({
   const fileInput = useRef<HTMLInputElement>(null);
   const ModeIcon = MODE_ICON[permissionMode];
   const hasProject = state.workspace.kind !== "none";
+  const selected = findModel(state.models.catalog, modelId, controller.active()?.provider);
+  const caps = {
+    vision: modelAllows(selected, state.settings, "vision"),
+    tools: modelAllows(selected, state.settings, "tools"),
+    reasoning: modelAllows(selected, state.settings, "reasoning"),
+    streaming: modelAllows(selected, state.settings, "streaming"),
+  };
 
   useEffect(() => {
     const fill = (event: Event) => {
@@ -58,9 +68,17 @@ export function Composer({
   }, [text]);
 
   async function onFiles(list: FileList | null) {
-    if (!list) return;
+    if (!list?.length) return;
+    const picked = [...list].slice(0, 4);
+    const ok = await controller.requestConfirm({
+      title: picked.length === 1 ? "Import this file?" : `Import ${picked.length} files?`,
+      message: `They will be attached to your next message: ${picked.map((file) => file.name).join(", ")}.`,
+      confirmLabel: "Import",
+      tone: "info",
+    });
+    if (!ok) return;
     const next: { name: string; mediaType: string; text?: string; dataUrl?: string }[] = [];
-    for (const file of [...list].slice(0, 4)) {
+    for (const file of picked) {
       if (file.type.startsWith("image/")) {
         const dataUrl = await fileToDataUrl(file);
         next.push({ name: file.name, mediaType: file.type, dataUrl });
@@ -81,14 +99,6 @@ export function Composer({
 
   return (
     <>
-      {!hasProject ? (
-        <button type="button" className="composer-notice" onClick={onOpenProject} title="Open the project the agent should work in">
-          <FolderPlus size={14} aria-hidden />
-          <span>
-            <strong>No project open.</strong> Kiln can talk, but it will not invent file changes or command output.
-          </span>
-        </button>
-      ) : null}
       <form
         className="composer"
         onSubmit={(event) => {
@@ -120,7 +130,14 @@ export function Composer({
                 <button
                   type="button"
                   aria-label={`Remove ${file.name}`}
-                  onClick={() => setFiles((current) => current.filter((_, item) => item !== index))}
+                  onClick={() => {
+                    void confirmed(controller, {
+                      title: `Remove ${file.name}?`,
+                      message: "It will not be attached to the next message.",
+                      confirmLabel: "Remove",
+                      tone: "danger",
+                    }, () => setFiles((current) => current.filter((_, item) => item !== index)));
+                  }}
                 >
                   <X size={12} aria-hidden />
                 </button>
@@ -179,6 +196,34 @@ export function Composer({
             onChange={(id) => controller.setPermissionMode(id as PermissionMode)}
           />
           <div className="spacer" />
+          <CapabilityIcon
+            icon={Eye}
+            pressed={state.settings.visionEnabled}
+            available={caps.vision}
+            label="Vision"
+            onClick={() => controller.setVisionEnabled(!state.settings.visionEnabled)}
+          />
+          <CapabilityIcon
+            icon={Wrench}
+            pressed={state.settings.toolsEnabled}
+            available={caps.tools}
+            label="Tool calling"
+            onClick={() => controller.setToolsEnabled(!state.settings.toolsEnabled)}
+          />
+          <CapabilityIcon
+            icon={Brain}
+            pressed={state.settings.reasoningEnabled}
+            available={caps.reasoning}
+            label="Reasoning"
+            onClick={() => controller.setReasoningEnabled(!state.settings.reasoningEnabled)}
+          />
+          <CapabilityIcon
+            icon={AudioLines}
+            pressed={state.settings.streamingEnabled}
+            available={caps.streaming}
+            label="Streaming"
+            onClick={() => controller.setStreamingEnabled(!state.settings.streamingEnabled)}
+          />
           {state.running ? (
             <button type="button" className="send-btn stop" onClick={() => controller.cancel()} aria-label="Stop" title="Stop (Esc)">
               <Square size={13} aria-hidden fill="currentColor" />
@@ -192,6 +237,31 @@ export function Composer({
       </form>
       <p className="disclaimer">Enter to send · Shift+Enter for a new line · Esc stops a turn · Kiln can make mistakes, so review the diffs.</p>
     </>
+  );
+}
+
+function CapabilityIcon({
+  icon: Icon,
+  pressed,
+  available,
+  label,
+  onClick,
+}: {
+  icon: typeof Brain;
+  pressed: boolean;
+  available: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  const title = !available
+    ? `${label} is off for this model. Enable it on the model in Settings, then this switch sends it.`
+    : pressed
+      ? `${label} on`
+      : `${label} off`;
+  return (
+    <button type="button" className={`icon-btn cap-btn${available ? "" : " dim"}`} aria-pressed={pressed} aria-label={title} title={title} onClick={onClick}>
+      <Icon size={15} aria-hidden />
+    </button>
   );
 }
 

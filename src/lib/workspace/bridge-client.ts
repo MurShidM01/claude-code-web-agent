@@ -65,6 +65,9 @@ export class BridgeClient implements WorkspacePort {
   readFile(path: string, offset?: number, limit?: number) {
     return this.rpc<FileReadResult>("readFile", { path, offset, limit });
   }
+  readBinary(path: string, maxBytes?: number) {
+    return this.rpc<{ mediaType: string; base64: string; bytes: number }>("readBinary", { path, maxBytes });
+  }
   writeFile(path: string, content: string) {
     return this.rpc<{ path: string; created: boolean; bytes: number }>("writeFile", { path, content });
   }

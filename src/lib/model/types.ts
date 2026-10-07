@@ -15,6 +15,20 @@ export interface ModelInfo {
   cost?: ModelCost;
   capabilities: string[];
   releasedAt?: string;
+  /** Filled by a live provider response. Never assumed from the model id. */
+  supports?: {
+    streaming?: boolean;
+    reasoning?: boolean;
+    vision?: boolean;
+    tools?: boolean;
+    reasoningEfforts?: string[];
+    defaultReasoningEffort?: string;
+    contextWindow?: number;
+    maxOutputTokens?: number;
+  };
+  source?: "puter" | "openai-codex" | "kiro" | "custom";
+  accountId?: string;
+  endpoint?: "auto" | "chat-completions" | "messages" | "responses";
 }
 
 export interface ModelCatalog {
@@ -43,6 +57,7 @@ export interface ModelMessage {
 
 export type ModelStreamEvent =
   | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "usage"; inputTokens?: number; outputTokens?: number }
   | { type: "error"; message: string; code?: string; retryable?: boolean }
@@ -57,6 +72,12 @@ export interface ChatRequest {
   maxTokens?: number;
   signal: AbortSignal;
   images?: { mediaType: string; dataUrl: string }[];
+  stream?: boolean;
+  reasoning?: boolean;
+  reasoningEffort?: string;
+  source?: "puter" | "openai-codex" | "kiro" | "custom";
+  accountId?: string;
+  endpoint?: "auto" | "chat-completions" | "messages" | "responses";
 }
 
 export interface ModelTransport {

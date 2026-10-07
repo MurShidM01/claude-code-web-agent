@@ -20,7 +20,9 @@ export function CommandPalette({ state, controller }: { state: AppState; control
         detail: `${workspace.kind === "fsa" ? "Folder" : "Bridge"} · ${workspace.root ?? ""}`,
         run: () => void controller.openWorkspace(workspace.id),
       })),
-      { id: "settings", label: "Open settings", run: () => controller.setSettingsOpen(true) },
+      { id: "settings", label: "Open settings", run: () => controller.openSettings() },
+      { id: "providers", label: "Connect a provider", detail: "OpenAI Code, Kiro, or a custom endpoint", run: () => controller.openSettings("providers") },
+      { id: "reasoning", label: state.settings.reasoningEnabled ? "Disable reasoning" : "Enable reasoning", run: () => controller.setReasoningEnabled(!state.settings.reasoningEnabled) },
       { id: "sidebar", label: "Toggle sidebar", run: () => controller.toggleSidebar() },
       { id: "explorer", label: "Toggle file panel", run: () => controller.toggleExplorer() },
       { id: "models", label: "Switch model", run: () => window.dispatchEvent(new Event("kiln:open-model")) },
@@ -39,7 +41,7 @@ export function CommandPalette({ state, controller }: { state: AppState; control
     ];
     const needle = query.toLowerCase();
     return actions.filter((item) => `${item.label} ${"detail" in item ? item.detail : ""}`.toLowerCase().includes(needle));
-  }, [controller, query, state.catalog.commands, state.conversations, state.workspaces, state.workspace.kind, state.workspace.label]);
+  }, [controller, query, state.catalog.commands, state.conversations, state.settings.reasoningEnabled, state.workspaces, state.workspace.kind, state.workspace.label]);
 
   useEffect(() => setActive(0), [query, state.paletteOpen]);
   if (!state.paletteOpen) return null;

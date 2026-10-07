@@ -32,6 +32,7 @@ export function Sidebar({
   onMode,
   onTheme,
   onSettings,
+  onProviders,
   onConnect,
   onSignIn,
   onSignOut,
@@ -46,6 +47,7 @@ export function Sidebar({
   onMode: (mode: PermissionMode) => void;
   onTheme: (theme: "light" | "dark" | "system") => void;
   onSettings: () => void;
+  onProviders?: () => void;
   onConnect: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -173,12 +175,14 @@ export function Sidebar({
             { id: "theme:dark", label: "Dark", group: "Theme" },
             { id: "theme:system", label: "System", group: "Theme" },
             { id: "settings", label: "Settings", group: "App" },
+            { id: "providers", label: "Providers", group: "App" },
             { id: "connect", label: "Open a project", group: "App" },
           ]}
           onChange={(id) => {
             if (id === "signin") state.auth.status === "signed-in" ? onSwitch() : onSignIn();
             else if (id === "signout") onSignOut();
             else if (id === "settings") onSettings();
+            else if (id === "providers") onProviders?.();
             else if (id === "connect") onConnect();
             else if (id.startsWith("mode:")) onMode(id.slice(5) as PermissionMode);
             else if (id.startsWith("theme:")) onTheme(id.slice(6) as "light" | "dark" | "system");
