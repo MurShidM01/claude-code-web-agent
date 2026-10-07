@@ -1,7 +1,7 @@
 import { BridgeError } from "@/lib/protocol/errors";
 import { fileLooksSensitive } from "@/lib/safety/redact";
 import { matchGlob, relativeToRoot, resolveInRoot, shouldSkipDir } from "@/lib/workspace/path";
-import { sliceLines } from "@/lib/tools/truncate";
+import { hashContent, sliceLines } from "@/lib/tools/truncate";
 import type {
   CommandResult,
   DirectoryEntry,
@@ -58,14 +58,20 @@ export class MemoryWorkspace implements WorkspacePort {
         bytes: file.content.length,
       };
     }
-    const sliced = sliceLines(file.content, offset, limit ?? 2000);
+    const paged = offset !== undefined || limit !== undefined;
+    const sliced = sliceLines(file.content, offset ?? 1, limit ?? 2000);
+    const lines = file.content.split("\n");
+    const pageText = lines.slice((offset ?? 1) - 1, (offset ?? 1) - 1 + (limit ?? 2000)).join("\n");
     return {
       path: rel,
-      content: file.content,
+      content: paged ? pageText : file.content,
+      numbered: sliced.text,
+      contentHash: hashContent(file.content),
       startLine: sliced.startLine,
       numLines: sliced.numLines,
       totalLines: sliced.totalLines,
       truncated: sliced.truncated,
+      complete: !paged && !sliced.truncated,
       binary: false,
       sensitive: fileLooksSensitive(rel),
       bytes: file.content.length,
@@ -122,6 +128,7 @@ export class MemoryWorkspace implements WorkspacePort {
   async searchFiles(input: { pattern?: string; query?: string; path?: string; glob?: string; maxResults?: number }): Promise<SearchResult> {
     const max = input.maxResults ?? 200;
     const root = input.path ? this.rel(input.path) : ".";
+    if (root !== "." && !this.dirs.has(root)) throw new BridgeError("not_found", `No such directory: ${root}`);
     const matches = [];
     let searched = 0;
     for (const [file, data] of this.files) {

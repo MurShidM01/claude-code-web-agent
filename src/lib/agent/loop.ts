@@ -8,6 +8,7 @@ import { decide, operationSignature, PermissionGate } from "@/lib/permissions/en
 import type { PermissionMode, SessionRule } from "@/lib/permissions/types";
 import { ToolInputError, type ToolContext, type ToolRegistry, type ToolResult } from "@/lib/tools/registry";
 import { truncateMiddle } from "@/lib/tools/truncate";
+import { errorCodeOf, isAbortError } from "@/lib/workspace/errors";
 import type { WorkspacePort } from "@/lib/workspace/types";
 
 export interface PermissionAnswer {
@@ -80,6 +81,24 @@ export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoop
   ];
   let finalText = "";
   let cancelled = false;
+  // Repeated-failure circuit breaker: a model that retries the exact same
+  // failing call is stuck. After two identical consecutive failures the next
+  // identical call is refused and the turn ends with an explanation instead of
+  // burning the whole iteration budget.
+  let consecutiveFailures = 0;
+  let lastFailureSignature: string | null = null;
+  let stopForRepeatedFailure = false;
+  const recordFailure = (sig: string) => {
+    if (sig === lastFailureSignature) consecutiveFailures += 1;
+    else {
+      consecutiveFailures = 1;
+      lastFailureSignature = sig;
+    }
+  };
+  const recordSuccess = () => {
+    consecutiveFailures = 0;
+    lastFailureSignature = null;
+  };
 
   if (depth === 0) {
     options.emit({ type: "status_update", phase: "understanding", detail: "Reading the request" });
@@ -152,6 +171,35 @@ export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoop
         });
         options.emit({ type: "status_update", phase: "cancelled", detail: "Stopped" });
         return { text: finalText, messages, iterations: iteration + 1, completed: false, cancelled };
+      }
+
+      const signature = stableSignature(call);
+      if (consecutiveFailures >= 2 && signature === lastFailureSignature) {
+        const repeated = {
+          ok: false,
+          error: {
+            code: "repeated_failure",
+            message: `This exact ${call.name} call has already failed ${consecutiveFailures} times in a row with the same arguments. Do not call it again. Change your approach — re-read the file, narrow the edit, use a different tool — or explain the blocker to the user.`,
+          },
+        };
+        options.emit({
+          type: "tool_requested",
+          toolUseId: call.id,
+          name: call.name,
+          input: call.input,
+          summary: `Repeat of ${call.name} (refused)`,
+        });
+        options.emit({
+          type: "tool_result",
+          toolUseId: call.id,
+          name: call.name,
+          ok: false,
+          isError: true,
+          output: repeated,
+        });
+        messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(repeated) });
+        stopForRepeatedFailure = true;
+        continue;
       }
 
       const allow = options.toolAllowlist;
@@ -242,6 +290,8 @@ export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoop
       try {
         const result = await tool.execute(asRecord(call.input), toolCtx);
         publishResult(options, call.id, call.name, result, stdout, stderr);
+        if (result.ok) recordSuccess();
+        else recordFailure(signature);
         if (call.name === "TodoWrite" && isTodoOutput(result.output)) {
           options.emit({ type: "plan_update", todos: result.output.todos });
         }
@@ -293,8 +343,22 @@ export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoop
             source: "tool",
           });
         }
+        // A denial is the user's decision, not a stuck loop; only real
+        // execution failures count toward the repeated-failure breaker.
+        if (!(error instanceof PermissionDenied)) recordFailure(signature);
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(payload) });
       }
+    }
+
+    if (stopForRepeatedFailure) {
+      const message =
+        "Stopped because the same tool call kept failing. Explain to the user what is blocking the task and what you need to continue.";
+      const messageId = createId("msg");
+      options.emit({ type: "assistant_text_delta", id: createId("delta"), messageId, delta: message });
+      options.emit({ type: "assistant_message_complete", messageId, text: message });
+      options.emit({ type: "status_update", phase: "failed", detail: "Repeated tool failure" });
+      messages.push({ role: "assistant", content: message });
+      return { text: message, messages, iterations: iteration + 1, completed: false, cancelled: false };
     }
 
     options.emit({ type: "status_update", phase: "reviewing", detail: "Reading tool results" });
@@ -473,8 +537,10 @@ function errorPayload(error: unknown) {
   if (error instanceof ToolInputError) {
     return { ok: false, error: { code: "invalid_tool_input", message: error.message } };
   }
-  const code =
-    typeof error === "object" && error && "code" in error ? String((error as { code: unknown }).code) : "tool_error";
+  if (isAbortError(error)) {
+    return { ok: false, error: { code: "cancelled", message: "The action was cancelled." } };
+  }
+  const code = errorCodeOf(error) ?? "tool_error";
   return {
     ok: false,
     error: {
@@ -482,6 +548,20 @@ function errorPayload(error: unknown) {
       message: error instanceof Error ? error.message : "Tool failed",
     },
   };
+}
+
+function stableSignature(call: { name: string; input: unknown }): string {
+  return `${call.name}${stableStringify(call.input)}`;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`);
+  return `{${entries.join(",")}}`;
 }
 
 interface Collected {

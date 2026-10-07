@@ -126,6 +126,50 @@ describe("agent loop", () => {
     expect(result.text).toBe("Recovered.");
     expect(model.calls).toBeGreaterThan(1);
   });
+
+  it("stops the turn when the model repeats the same failing call", async () => {
+    const failingEdit = {
+      name: "Edit",
+      input: { file_path: "src/math.js", old_string: "does not exist", new_string: "x" },
+    };
+    const model = new ScriptedModel([
+      { tools: [failingEdit] },
+      { tools: [failingEdit] },
+      { tools: [failingEdit] },
+      { text: "This should not be reached." },
+    ]);
+    const run = harness(model, "auto-edit");
+    const result = await run.done;
+    expect(result.completed).toBe(false);
+    const toolMessages = result.messages.filter((message) => message.role === "tool");
+    expect(toolMessages.some((message) => String(message.content ?? "").includes("repeated_failure"))).toBe(true);
+    // The third identical call was refused before it executed, and the file
+    // was never modified.
+    expect(workspaceText(run.workspace)).toContain("return a + b;");
+    expect(run.events.some((event) => event.type === "status_update" && event.phase === "failed")).toBe(true);
+  });
+
+  it("lets the model recover when a different call succeeds between failures", async () => {
+    const failingEdit = {
+      name: "Edit",
+      input: { file_path: "src/math.js", old_string: "does not exist", new_string: "x" },
+    };
+    const model = new ScriptedModel([
+      { tools: [failingEdit] },
+      { tools: [{ name: "Read", input: { file_path: "src/math.js" } }] },
+      { tools: [failingEdit] },
+      { tools: [failingEdit] },
+      { tools: [failingEdit] },
+      { text: "Stopped after repeats." },
+    ]);
+    const run = harness(model, "auto-edit");
+    const result = await run.done;
+    // One success resets the streak, so the breaker only trips after the
+    // three consecutive failures at the end.
+    expect(result.completed).toBe(false);
+    const toolMessages = result.messages.filter((message) => message.role === "tool");
+    expect(toolMessages.filter((message) => String(message.content ?? "").includes("repeated_failure"))).toHaveLength(1);
+  });
 });
 
 function workspaceText(workspace: MemoryWorkspace): string {

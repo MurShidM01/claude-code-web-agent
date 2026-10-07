@@ -23,9 +23,9 @@ A remote deployment cannot access your computer. Shell, git, and process control
 2. You pick a permission mode. It is enforced in the tool layer before the tool runs.
 3. The agent loop streams text and tool calls until the task is done, refused, failed, or you stop it.
 4. File and command tools go through a workspace port. In local mode that port is the bridge, reached via `/api/bridge` so the pairing token stays on the machine. In deploy mode the same port is a bridge you pair directly.
-5. Denials, missing capabilities, and command failures return structured tool results. The agent is expected to adapt, not to invent a success.
+5. Denials, missing capabilities, and command failures return structured tool results. The agent is expected to adapt, not to invent a success. If the model repeats the same failing tool call three times in a row, the loop refuses it and ends the turn with an explanation.
 
-The bridge speaks a versioned JSON protocol. Paths are resolved inside the workspace root, shell output is capped, the process environment is filtered, and commands such as `rm -rf /` are rejected before spawn.
+The bridge speaks a versioned JSON protocol. Paths are resolved inside the workspace root, shell output is capped, the process environment is filtered, and commands such as `rm -rf /` are rejected before spawn. Writes are atomic (staged in a temp file, then renamed), and stopping the bridge also stops the commands it started.
 
 ## Layout
 
@@ -47,4 +47,4 @@ npm test
 npm run typecheck
 ```
 
-The tests cover permission decisions, tool schemas, path escape, the agent loop (including deny, retry, and cancel), the real bridge, and a flow that loads a model catalog, connects a workspace, edits a file, runs a command, and persists the theme.
+The tests cover permission decisions, tool schemas, path escape, the agent loop (including deny, retry, cancel, and the repeated-failure breaker), the folder-picker workspace's typed errors (including creating a new file), the file tools (`Write`, `Edit`, `MultiEdit`, `Stat`, `BashOutput`), the real bridge (atomic writes, typed `not_found` errors, move, delete, search), and a flow that loads a model catalog, connects a workspace, edits a file, runs a command, and persists the theme.

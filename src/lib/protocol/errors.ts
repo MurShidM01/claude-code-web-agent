@@ -37,5 +37,14 @@ export class BridgeError extends Error {
 }
 
 export function isBridgeError(value: unknown): value is BridgeError {
-  return value instanceof BridgeError || (typeof value === "object" && value !== null && "code" in value && "message" in value);
+  // DOMExceptions also carry a `code` and a `message`, but their code is a
+  // number — a typed bridge error always has a string code.
+  return (
+    value instanceof BridgeError ||
+    (typeof value === "object" &&
+      value !== null &&
+      "code" in value &&
+      "message" in value &&
+      typeof (value as { code: unknown }).code === "string")
+  );
 }

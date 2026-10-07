@@ -15,6 +15,8 @@ export function classifyTool(name: string, raw: unknown): Operation {
     case "LS":
     case "Glob":
     case "Grep":
+    case "Stat":
+    case "BashOutput":
     case "GitStatus":
     case "GitDiff":
     case "GitLog":
@@ -26,10 +28,11 @@ export function classifyTool(name: string, raw: unknown): Operation {
         risk: "safe",
         summary: summaryFor(name, input),
         why: whyFor(name, input),
-        paths: [pathOf("file_path") || pathOf("path") || pathOf("notebook_path")].filter(Boolean),
+        paths: [pathOf("file_path") || pathOf("path") || pathOf("notebook_path") || pathOf("task_id")].filter(Boolean),
       });
     case "Write":
     case "Edit":
+    case "MultiEdit":
     case "NotebookEdit":
       return op({
         tool: name,
