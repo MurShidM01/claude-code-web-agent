@@ -19,13 +19,17 @@ export interface RouterContext {
 export class RoutedModelTransport implements ModelTransport {
   readonly name = "routed";
   lastNotice: string | null = null;
-  private puter = new PuterModelTransport();
+  private puter: ModelTransport = new PuterModelTransport();
   private index = new Map<string, ModelInfo>();
 
   constructor(
     private readonly read: () => RouterContext,
     private readonly onAccount?: (account: ProviderAccount) => void,
-  ) {}
+    /** Injectable for tests; production always uses the real Puter client. */
+    puter?: ModelTransport,
+  ) {
+    if (puter) this.puter = puter;
+  }
 
   async listProviders(): Promise<string[]> {
     const models = await this.listModels();
@@ -36,12 +40,17 @@ export class RoutedModelTransport implements ModelTransport {
     const ctx = this.read();
     const notices: string[] = [];
     const chunks: ModelInfo[][] = [];
+    // Providers that fail to list this time keep working from the ids we
+    // learned earlier in the session, so an in-flight chat never loses the
+    // model the user picked because of a transient 502 from a models route.
+    const stale = new Set<string>();
     try {
       const puterModels = await this.puter.listModels();
       chunks.push(puterModels.map((model) => ({ ...model, source: model.source ?? "puter" })));
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (message && !/sign|auth|signed/i.test(message)) notices.push(message);
+      stale.add("puter");
     }
     const target = targetFromBridge({ status: ctx.bridgeStatus, transport: ctx.bridgeTransport, settings: ctx.settings }) ?? { kind: "api" as const };
     for (const account of ctx.settings.providers.filter((item) => item.enabled && hasSecret(item))) {
@@ -52,9 +61,16 @@ export class RoutedModelTransport implements ModelTransport {
         chunks.push(listed.models ?? []);
       } catch (error) {
         notices.push(error instanceof Error ? error.message : `Could not list models for ${account.label}.`);
+        stale.add(account.id);
       }
     }
     chunks.push(customModels(ctx.settings));
+    // Carry over anything we already knew from a previous successful listing.
+    for (const model of this.index.values()) {
+      const source = model.source ?? (model.accountId ? "" : "puter");
+      if (source === "puter" && stale.has("puter")) chunks.push([model]);
+      if (model.accountId && stale.has(model.accountId)) chunks.push([model]);
+    }
     const models = dedupe(chunks.flat());
     this.index = new Map(models.map((model) => [lookupKey(model), model]));
     this.lastNotice = notices.filter(Boolean).join(" ");
@@ -63,18 +79,42 @@ export class RoutedModelTransport implements ModelTransport {
   }
 
   async *streamChat(request: ChatRequest): AsyncIterable<ModelStreamEvent> {
-    const model = this.find(request);
-    if (!model || model.source === "puter" || !model.accountId) {
+    let model = this.find(request);
+    if (!model) {
+      // The index is built by listModels(). A page that has not refreshed the
+      // catalog yet — or one whose catalog was cleared — must not silently
+      // send a Codex/Kiro model id to Puter. Refresh once, then decide.
+      await this.listModels().catch(() => undefined);
+      model = this.find(request);
+    }
+    // A model that came from a real provider account always goes through that
+    // account, even when a stale entry says otherwise.
+    const account = this.accountFor(model);
+    if (account) {
+      const ctx = this.read();
+      const caps = resolveCapabilities(model ?? null, ctx.settings);
+      const target = targetFromBridge({ status: ctx.bridgeStatus, transport: ctx.bridgeTransport, settings: ctx.settings }) ?? { kind: "api" as const };
+      const fresh = await this.refreshIfNeeded(account, target);
+      yield* providerStream("/chat", target, { account: fresh, request: { ...request, stream: caps.streaming, reasoning: caps.reasoning, reasoningEffort: caps.reasoningEffort }, caps }, request.signal);
+      return;
+    }
+    // No account: Puter can serve the id only when Puter itself lists it.
+    const puterModels = await this.puter.listModels().catch(() => []);
+    if (model?.source === "puter" || puterModels.some((item) => item.id === request.model)) {
       yield* this.puter.streamChat(request);
       return;
     }
-    const ctx = this.read();
-    const account = ctx.settings.providers.find((item) => item.id === model.accountId);
-    if (!account) throw new ModelError("That model's provider is no longer connected.", "provider", false);
-    const caps = resolveCapabilities(model, ctx.settings);
-    const target = targetFromBridge({ status: ctx.bridgeStatus, transport: ctx.bridgeTransport, settings: ctx.settings }) ?? { kind: "api" as const };
-    const fresh = await this.refreshIfNeeded(account, target);
-    yield* providerStream("/chat", target, { account: fresh, request: { ...request, stream: caps.streaming, reasoning: caps.reasoning, reasoningEffort: caps.reasoningEffort }, caps }, request.signal);
+    throw new ModelError(
+      `Kiln cannot reach a provider for “${request.model}”. Open Settings → Providers, reconnect the account, then pick the model again.`,
+      "catalog",
+      false,
+    );
+  }
+
+  /** The account that owns a model, or undefined for Puter-hosted ids. */
+  private accountFor(model: ModelInfo | undefined): ProviderAccount | undefined {
+    if (!model?.accountId) return undefined;
+    return this.read().settings.providers.find((item) => item.id === model.accountId);
   }
 
   loginTargetFor(kind: "openai-codex" | "kiro"): ProviderTarget {

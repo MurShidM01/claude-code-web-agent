@@ -303,9 +303,20 @@ export class AppController {
           ? { notice: { title: missing ? "Model no longer available" : "Provider notice", message: noticeMessage, tone: "warning" as const } }
           : {}),
       });
-      if (missing && active) {
-        active.modelId = null;
-        this.touch(active);
+      if (active && (missing || !active.modelId)) {
+        // Nothing selected — or the old pick vanished from the catalog. Adopt
+        // the first model the providers reported so the next send just works
+        // instead of bouncing off a modal the user may never see.
+        const fallback = models[0];
+        if (fallback) {
+          active.modelId = fallback.id;
+          active.provider = fallback.provider;
+          this.touch(active);
+          this.persistSoon(active);
+        } else if (missing) {
+          active.modelId = null;
+          this.touch(active);
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not load models.";
@@ -928,13 +939,28 @@ export class AppController {
     }
     const conversation = this.ensureConversation();
     if (!conversation.modelId || !findModel(this.snapshot.models.catalog, conversation.modelId, conversation.provider)) {
-      this.set({
-        notice: {
-          title: "Choose a model",
-          message: this.snapshot.models.error || "Load a provider and pick a model. Kiln does not fall back to a hardcoded model.",
-        },
-      });
-      return;
+      // The catalog may simply not have loaded yet. Refresh once, adopt the
+      // first live model, and only then bother the user.
+      await this.refreshModels().catch(() => undefined);
+      const live = this.snapshot.models.catalog?.models ?? [];
+      const picked = conversation.modelId
+        ? findModel(this.snapshot.models.catalog, conversation.modelId, conversation.provider)
+        : null;
+      const fallback = picked ?? live[0] ?? null;
+      if (fallback) {
+        conversation.modelId = fallback.id;
+        conversation.provider = fallback.provider;
+      } else {
+        this.set({
+          notice: {
+            title: "Choose a model",
+            message:
+              this.snapshot.models.error ||
+              "No provider has reported a model yet. Open Settings → Providers, connect an account (Puter, OpenAI Code, Kiro, or a custom endpoint), then send again.",
+          },
+        });
+        return;
+      }
     }
     const slash = parseSlash(trimmed);
     let userText = trimmed;
@@ -1079,12 +1105,18 @@ export class AppController {
       });
       conversation.modelMessages = result.messages.filter((message) => message.role !== "system");
     } catch (error) {
+      const message = error instanceof Error ? error.message : "The turn failed.";
       this.apply(conversation, {
         type: "error",
         id: createId("err"),
-        message: error instanceof Error ? error.message : "The turn failed.",
+        message,
         source: "app",
       });
+      // Surface the failure as a top-level notice too — the chat thread
+      // can be dismissed or scrolled past, and the user deserves to know
+      // *why* the turn stopped when it just blinks back to "Ready".
+      this.set({ notice: { title: "The turn stopped", message, tone: "danger" } });
+      log.error("agent turn failed", { error: message });
     } finally {
       this.abort = null;
       this.set({ running: false, permission: null });

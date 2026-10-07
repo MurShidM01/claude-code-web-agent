@@ -16,6 +16,7 @@ import { Sidebar } from "@/components/shell/Sidebar";
 import { AlertDialog, ConfirmDialog, confirmed } from "@/components/ui/AlertDialog";
 import { Explorer } from "@/components/workspace/Explorer";
 import { PHASE_LABEL } from "@/lib/agent/phases";
+import type { AppState } from "@/lib/app/controller";
 import type { PermissionMode } from "@/lib/permissions/types";
 
 export function AppShell() {
@@ -75,6 +76,11 @@ function Shell() {
   const last = blocks[blocks.length - 1];
   const growth =
     last?.kind === "assistant" || last?.kind === "user" ? last.text.length : last?.kind === "tool" ? `${last.status}${last.stdout.length}` : "";
+  /* The thread already shows progress while a tool runs or tokens stream.
+     This row only covers the gaps: the model request itself, and the pause
+     between an assistant message and the next tool call. */
+  const streamingSomething =
+    last?.kind === "assistant" ? Boolean(last.text) || Boolean(last.reasoning) : last?.kind === "tool" ? last.status === "requested" || last.status === "running" : false;
   useLayoutEffect(() => {
     const node = threadRef.current;
     if (!node || !stick.current) return;
@@ -246,6 +252,7 @@ function Shell() {
               }
               return null;
             })}
+            {running && !streamingSomething ? <WorkingRow state={state} /> : null}
           </div>
         </div>
         <div className="dock" ref={dockRef}>
@@ -322,6 +329,25 @@ function Shell() {
         }
       />
       <ConfirmDialog request={state.confirm} onConfirm={() => controller.answerConfirm(true)} onCancel={() => controller.answerConfirm(false)} />
+    </div>
+  );
+}
+
+/**
+ * The quiet gap between "you sent a message" and the first token, or between
+ * a tool finishing and the model picking up the result. Without it a slow
+ * provider looks like a frozen page.
+ */
+function WorkingRow({ state }: { state: AppState }) {
+  return (
+    <div className="working" role="status" aria-live="polite">
+      <span className="working-dots" aria-hidden>
+        <i />
+        <i />
+        <i />
+      </span>
+      <span className="working-text">{state.phaseDetail || PHASE_LABEL[state.phase]}</span>
+      <span className="working-phase">{PHASE_LABEL[state.phase]}</span>
     </div>
   );
 }

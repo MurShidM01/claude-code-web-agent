@@ -4,8 +4,6 @@ import {
   ChevronDown,
   FolderOpen,
   FolderPlus,
-  LogIn,
-  LogOut,
   MessageSquare,
   Monitor,
   Moon,
@@ -62,15 +60,16 @@ export function Sidebar({
     : state.bridge.status === "connected"
       ? "Bridge ready — pick a folder"
       : "No folder connected";
+  const accountName = state.auth.status === "signed-in" ? state.auth.user?.username ?? "Puter user" : "Sign in";
   const initials = (state.auth.user?.username ?? "K")
     .split(/[\s._-]+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]!.toUpperCase())
     .join("");
-  const themeIcon = state.settings.theme === "dark" ? Moon : state.settings.theme === "light" ? Sun : Monitor;
-  const ThemeIcon = themeIcon;
+  const ThemeIcon = state.settings.theme === "dark" ? Moon : state.settings.theme === "light" ? Sun : Monitor;
   const ModeIcon = mode === "full" ? Zap : mode === "auto-edit" ? PencilLine : ShieldQuestion;
+  const groups = groupedConversations(state);
 
   return (
     <aside className="sidebar" aria-label="Conversations">
@@ -106,20 +105,18 @@ export function Sidebar({
           </span>
           <ChevronDown size={14} className="chev" aria-hidden />
         </button>
-        <button type="button" className="new-chat" onClick={onNew}>
+        <button type="button" className="new-chat" onClick={onNew} title="New chat (Ctrl/⌘ Shift O)">
           <Plus size={16} aria-hidden />
-          New chat
+          <span>New chat</span>
         </button>
       </div>
 
       <div className="side-scroll">
         {state.conversations.length === 0 ? (
-          <p className="meta" style={{ padding: "6px 10px" }}>
-            Your conversations are stored in this browser only.
-          </p>
+          <p className="side-empty">Your conversations live in this browser only.</p>
         ) : null}
-        {groupedConversations(state).map((group) => (
-          <div key={group.label}>
+        {groups.map((group) => (
+          <div key={group.label} className="side-group">
             <div className="section-label">{group.label}</div>
             {group.items.map((conversation) => (
               <div key={conversation.id} className="side-row">
@@ -127,6 +124,7 @@ export function Sidebar({
                   type="button"
                   className={`side-link ${conversation.id === state.activeId ? "active" : ""}`}
                   onClick={() => onSelect(conversation.id)}
+                  title={conversation.title}
                 >
                   <MessageSquare size={15} aria-hidden />
                   <span>{conversation.title}</span>
@@ -156,9 +154,7 @@ export function Sidebar({
                 {initials}
               </span>
               <span className="acct-text">
-                <span className="acct-name">
-                  {state.auth.status === "signed-in" ? state.auth.user?.username ?? "Puter user" : "Sign in"}
-                </span>
+                <span className="acct-name">{accountName}</span>
                 <span className="acct-sub">
                   {PERMISSION_MODE_LABEL[mode]} · {state.settings.theme}
                 </span>
@@ -193,8 +189,8 @@ export function Sidebar({
           <span className="truncate">
             {connected ? `${state.workspace.kind === "bridge" ? "Bridge" : "Files"} · ${state.workspace.label}` : "No project open"}
           </span>
-          <ModeIcon size={13} aria-hidden style={{ marginLeft: "auto", flex: "none", opacity: 0.55 }} />
-          <ThemeIcon size={13} aria-hidden style={{ flex: "none", opacity: 0.55 }} />
+          <ModeIcon size={13} aria-hidden className="status-icon" />
+          <ThemeIcon size={13} aria-hidden className="status-icon" />
         </div>
       </div>
     </aside>

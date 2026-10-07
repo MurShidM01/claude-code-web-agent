@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { AudioLines, Brain, ChevronDown, Cpu, Eye, RefreshCw, Wrench } from "lucide-react";
+import { AudioLines, Brain, ChevronDown, Cpu, Eye, RefreshCw, Search, Sparkles, Wrench } from "lucide-react";
 import { groupModels, queryModels, type ModelSort } from "@/lib/model/catalog";
 import type { AppState } from "@/lib/app/controller";
 
@@ -40,6 +40,8 @@ export function ModelPicker({
   const groups = groupModels(models);
   const flat = groups.flatMap((group) => group.models);
   const selected = state.models.catalog?.models.find((model) => model.id === selectedId);
+  const providers = state.models.catalog?.providers ?? [];
+  const modelCount = state.models.catalog?.models.length ?? 0;
 
   useEffect(() => {
     const onPointer = (event: MouseEvent) => {
@@ -55,11 +57,13 @@ export function ModelPicker({
     return () => window.removeEventListener("kiln:open-model", openPicker);
   }, []);
 
+  const loading = state.models.status === "loading" || state.models.status === "idle";
+
   return (
-    <div ref={root} style={{ position: "relative" }}>
+    <div ref={root} style={{ position: "relative" }} className="model-picker">
       <button
         type="button"
-        className="chip"
+        className="model-picker-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
@@ -67,17 +71,31 @@ export function ModelPicker({
         onClick={() => setOpen((value) => !value)}
       >
         <Cpu size={14} aria-hidden />
-        <span className="chip-label">
-          <strong>{selected?.name ?? (state.models.status === "loading" ? "Loading models" : "Choose model")}</strong>
+        <span className="model-picker-label">
+          {selected ? (
+            <>
+              <strong>{selected.name}</strong>
+              <span>{selected.provider}</span>
+            </>
+          ) : loading ? (
+            <>
+              <strong>Loading models…</strong>
+              <span>Fetching the live catalog</span>
+            </>
+          ) : (
+            <>
+              <strong>{modelCount ? "Choose model" : "No models yet"}</strong>
+              <span>{modelCount ? `${modelCount} available` : "Connect a provider"}</span>
+            </>
+          )}
         </span>
         <ChevronDown size={13} className="chev" aria-hidden />
       </button>
       {open ? (
         <div
-          className="popover"
+          className="popover model-popover"
           id={listId}
           role="listbox"
-          style={{ left: 0, bottom: "calc(100% + 8px)", width: "min(380px, calc(100vw - 48px))" }}
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
             if (event.key === "ArrowDown") setActive((index) => Math.min(flat.length - 1, index + 1));
@@ -88,77 +106,88 @@ export function ModelPicker({
             }
           }}
         >
-          <input
-            autoFocus
-            placeholder="Search models"
-            aria-label="Search models"
-            value={state.models.search}
-            onChange={(event) => onQuery(event.target.value)}
-          />
-          <div className="seg" style={{ padding: 6 }}>
-            <button type="button" className="chip" aria-pressed={state.models.sort === "name"} onClick={() => onSort("name")}>Name</button>
-            <button type="button" className="chip" aria-pressed={state.models.sort === "provider"} onClick={() => onSort("provider")}>Provider</button>
-            <button type="button" className="chip" aria-pressed={state.models.sort === "context"} onClick={() => onSort("context")}>Context</button>
-            <button type="button" className="chip" onClick={onRefresh} aria-label="Refresh model catalog" title="Refresh model catalog">
-              <RefreshCw size={13} aria-hidden />
-              <span className="hide-sm">Refresh</span>
+          <div className="model-popover-head">
+            <div className="model-popover-search">
+              <Search size={14} aria-hidden />
+              <input
+                autoFocus
+                placeholder="Search models"
+                aria-label="Search models"
+                value={state.models.search}
+                onChange={(event) => onQuery(event.target.value)}
+              />
+            </div>
+            <button type="button" className="icon-btn ghost" onClick={onRefresh} aria-label="Refresh model catalog" title="Refresh model catalog">
+              <RefreshCw size={14} aria-hidden />
             </button>
           </div>
-          <div className="seg" style={{ padding: "0 6px 6px" }}>
-            <button type="button" className="chip" aria-pressed={state.models.provider === "all"} onClick={() => onProvider("all")}>All</button>
-            {state.models.catalog?.providers.slice(0, 8).map((provider) => (
-              <button key={provider} type="button" className="chip" aria-pressed={state.models.provider === provider} onClick={() => onProvider(provider)}>
-                {provider}
-              </button>
+
+          <div className="model-popover-tabs" role="tablist" aria-label="Sort and filter">
+            <div className="seg">
+              <button type="button" className="seg-btn" aria-pressed={state.models.sort === "name"} onClick={() => onSort("name")}>Name</button>
+              <button type="button" className="seg-btn" aria-pressed={state.models.sort === "provider"} onClick={() => onSort("provider")}>Provider</button>
+              <button type="button" className="seg-btn" aria-pressed={state.models.sort === "context"} onClick={() => onSort("context")}>Context</button>
+            </div>
+            <div className="seg seg-scroll">
+              <button type="button" className="seg-btn" aria-pressed={state.models.provider === "all"} onClick={() => onProvider("all")}>All</button>
+              {providers.slice(0, 12).map((provider) => (
+                <button key={provider} type="button" className="seg-btn" aria-pressed={state.models.provider === provider} onClick={() => onProvider(provider)}>
+                  {provider}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="model-popover-body">
+            {state.models.status === "error" ? <p className="meta error">{state.models.error}</p> : null}
+            {state.models.status === "idle" ? <p className="meta">Connect a provider in Settings to load models. Nothing is hardcoded.</p> : null}
+            {state.models.status === "ready" && flat.length === 0 ? (
+              <p className="meta">
+                {state.auth.status === "signed-in"
+                  ? "No models match. The catalog is live — nothing is hardcoded."
+                  : "The live catalog is empty. Connect a provider in Settings, then refresh."}
+              </p>
+            ) : null}
+            {groups.map((group) => (
+              <div key={group.provider} className="model-popover-group">
+                <div className="model-popover-group-head">
+                  <strong>{group.provider}</strong>
+                  <span className="meta">{group.models.length}</span>
+                </div>
+                {group.models.map((model) => {
+                  const index = flat.findIndex((item) => item.id === model.id && item.provider === model.provider);
+                  return (
+                    <button
+                      key={`${model.provider}:${model.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected={model.id === selectedId}
+                      className={`model-popover-item${index === active ? " active" : ""}`}
+                      onMouseEnter={() => setActive(index)}
+                      onClick={() => {
+                        onSelect(model.id, model.provider);
+                        setOpen(false);
+                      }}
+                    >
+                      <span className="model-popover-item-main">
+                        <strong>{model.name}</strong>
+                        <span className="model-popover-item-id">{model.id}</span>
+                      </span>
+                      <span className="model-popover-item-meta">
+                        {model.contextWindow ? <span className="meta">{Math.round(model.contextWindow / 1000)}k ctx</span> : null}
+                        <span className="cap-inline" aria-hidden>
+                          {model.capabilities.some((cap) => /vision/i.test(cap)) ? <Eye size={11} /> : null}
+                          {model.capabilities.some((cap) => /tool|function/i.test(cap)) ? <Wrench size={11} /> : null}
+                          {model.capabilities.some((cap) => /reason/i.test(cap)) ? <Brain size={11} /> : null}
+                          {model.capabilities.some((cap) => /stream/i.test(cap)) ? <AudioLines size={11} /> : null}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             ))}
           </div>
-          {state.models.status === "error" ? <p className="meta" style={{ padding: 8 }}>{state.models.error}</p> : null}
-          {state.models.status === "idle" ? <p className="meta" style={{ padding: 8 }}>Connect a provider in Settings to load models. Nothing is hardcoded.</p> : null}
-          {state.models.status === "ready" && flat.length === 0 ? (
-            <p className="meta" style={{ padding: 8 }}>
-              {state.auth.status === "signed-in"
-                ? "No models match. The catalog is live — nothing is hardcoded."
-                : "The live catalog is empty. Connect a provider in Settings, then refresh."}
-            </p>
-          ) : null}
-          {groups.map((group) => (
-            <div key={group.provider}>
-              <div className="section-label">{group.provider}</div>
-              {group.models.map((model) => {
-                const index = flat.findIndex((item) => item.id === model.id && item.provider === model.provider);
-                return (
-                  <button
-                    key={`${model.provider}:${model.id}`}
-                    type="button"
-                    role="option"
-                    aria-selected={model.id === selectedId}
-                    className="menu-item"
-                    onMouseEnter={() => setActive(index)}
-                    onClick={() => {
-                      onSelect(model.id, model.provider);
-                      setOpen(false);
-                    }}
-                  >
-                    <span>
-                      {model.name}
-                      <span className="cap-inline" aria-hidden>
-                        {model.capabilities.some((cap) => /vision/i.test(cap)) ? <Eye size={12} /> : null}
-                        {model.capabilities.some((cap) => /tool|function/i.test(cap)) ? <Wrench size={12} /> : null}
-                        {model.capabilities.some((cap) => /reason/i.test(cap)) ? <Brain size={12} /> : null}
-                        {model.capabilities.some((cap) => /stream/i.test(cap)) ? <AudioLines size={12} /> : null}
-                      </span>
-                      <span className="meta">
-                        <br />
-                        {model.id}
-                        {model.contextWindow ? ` · ${Math.round(model.contextWindow / 1000)}k context` : ""}
-                        {model.cost?.input != null ? ` · in ${model.cost.input}` : ""}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
         </div>
       ) : null}
     </div>

@@ -163,12 +163,12 @@ export function Composer({
           </button>
           <button
             type="button"
-            className={`chip${hasProject ? "" : " alert"}`}
+            className={`composer-chip${hasProject ? "" : " alert"}`}
             title={hasProject ? `${state.workspace.root ?? state.workspace.label} · ${PERMISSION_MODE_LABEL[permissionMode]}` : "Open a project (Ctrl/⌘ O)"}
             onClick={onOpenProject}
           >
             {hasProject ? <FolderOpen size={14} aria-hidden /> : <FolderPlus size={14} aria-hidden />}
-            <span className="chip-label hide-sm">{hasProject ? state.workspace.label : "Open project"}</span>
+            <span className="composer-chip-label">{hasProject ? state.workspace.label : "Open project"}</span>
           </button>
           <ModelPicker
             state={state}
@@ -180,11 +180,12 @@ export function Composer({
             onRefresh={() => void controller.refreshModels()}
           />
           <Menu
+            triggerClassName="composer-chip"
             triggerTitle={`Permission mode: ${PERMISSION_MODE_LABEL[permissionMode]}`}
             label={
               <>
                 <ModeIcon size={14} aria-hidden />
-                <span className="chip-label hide-sm">{PERMISSION_MODE_LABEL[permissionMode]}</span>
+                <span className="composer-chip-label">{PERMISSION_MODE_LABEL[permissionMode]}</span>
               </>
             }
             value={permissionMode}

@@ -147,6 +147,19 @@ export async function runAgentTurn(options: AgentLoopOptions): Promise<AgentLoop
     }
 
     if (!streamed.toolCalls.length) {
+      // A model that answers with nothing used to end the turn in silence:
+      // the phase flipped back to "Finished" and the thread looked dead. Say
+      // what happened so the user can pick a different model or retry.
+      if (!streamed.text.trim()) {
+        const empty = emptyReplyMessage(options.modelId, streamed.reasoningOnly);
+        options.emit({ type: "assistant_message_complete", messageId: streamed.messageId, text: empty });
+        if (depth === 0) {
+          options.emit({ type: "status_update", phase: "finished", detail: "The model returned no text" });
+          options.emit({ type: "task_completion", summary: empty.slice(0, 280) });
+        }
+        messages.push({ role: "assistant", content: empty });
+        return { text: empty, messages, iterations: iteration + 1, completed: true, cancelled: false };
+      }
       if (depth === 0) {
         options.emit({ type: "status_update", phase: "finished", detail: "Finished" });
         options.emit({ type: "task_completion", summary: streamed.text.slice(0, 280) });
@@ -592,6 +605,8 @@ interface Collected {
   messageId: string;
   text: string;
   toolCalls: { id: string; name: string; input: unknown }[];
+  /** The stream carried reasoning but no answer text. */
+  reasoningOnly: boolean;
 }
 
 async function streamWithRetry(options: AgentLoopOptions, messages: ModelMessage[]): Promise<Collected> {
@@ -619,6 +634,8 @@ async function streamWithRetry(options: AgentLoopOptions, messages: ModelMessage
 async function collect(options: AgentLoopOptions, messages: ModelMessage[], emitDeltas: boolean): Promise<Collected> {
   const messageId = createId("msg");
   let text = "";
+  let reasoning = "";
+  let sawToolStart = false;
   const toolCalls: Collected["toolCalls"] = [];
   let emitted = false;
   const stream = options.model.streamChat({
@@ -645,9 +662,11 @@ async function collect(options: AgentLoopOptions, messages: ModelMessage[], emit
         }
       },
       onReasoning(delta) {
+        reasoning += delta;
         if (emitDeltas && delta) options.emit({ type: "assistant_reasoning_delta", messageId, delta });
       },
       onTool(call) {
+        sawToolStart = true;
         toolCalls.push(call);
       },
       onError(error) {
@@ -656,7 +675,14 @@ async function collect(options: AgentLoopOptions, messages: ModelMessage[], emit
     });
   }
   void emitted;
-  return { messageId, text, toolCalls };
+  return { messageId, text, toolCalls, reasoningOnly: Boolean(reasoning.trim()) && !text.trim() && !sawToolStart };
+}
+
+function emptyReplyMessage(modelId: string, reasoningOnly: boolean): string {
+  if (reasoningOnly) {
+    return `**${modelId}** produced reasoning but no answer.\n\nThat usually means the request hit a provider quirk — a tool schema it will not accept, a context the account rejects, or an empty stream from a gateway. Try again, pick another model, or turn **Reasoning** off in the composer and resend.`;
+  }
+  return `**${modelId}** returned an empty reply.\n\nNothing was streamed back. Check that the account still has quota, that the model id exists for that provider, and that the local bridge is still running — then send the message again.`;
 }
 
 export function applyStreamEvent(

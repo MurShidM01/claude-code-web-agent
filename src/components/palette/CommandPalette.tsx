@@ -67,7 +67,8 @@ export function CommandPalette({ state, controller }: { state: AppState; control
             }}
           />
         </div>
-        <div style={{ maxHeight: 360, overflow: "auto", padding: 6 }}>
+        <div className="palette-list">
+          {items.length === 0 ? <p className="meta palette-empty">No match for “{query}”. Try “model”, “project”, or a conversation title.</p> : null}
           {items.map((item, index) => (
             <button
               key={item.id}

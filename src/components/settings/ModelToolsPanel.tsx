@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AudioLines, Brain, Eye, Plus, RefreshCw, Trash2, Wrench } from "lucide-react";
+import { AudioLines, Brain, Eye, Plus, RefreshCw, Search, Trash2, Wrench } from "lucide-react";
 import { confirmed } from "@/components/ui/AlertDialog";
 import type { AppController, AppState } from "@/lib/app/controller";
 import type { ModelInfo } from "@/lib/model/types";
@@ -22,51 +22,100 @@ export function ModelToolsPanel({ state, controller }: { state: AppState; contro
   const [modelId, setModelId] = useState("");
   const [modelName, setModelName] = useState("");
   const [flags, setFlags] = useState<CapabilityFlags>({ vision: true, tools: true, reasoning: false, streaming: true });
+  const [activeProvider, setActiveProvider] = useState<string>("all");
   const models = useMemo(() => {
     const list = state.models.catalog?.models ?? [];
     const needle = query.trim().toLowerCase();
-    return needle ? list.filter((model) => `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(needle)) : list;
-  }, [query, state.models.catalog]);
+    return list.filter((model) => {
+      if (activeProvider !== "all" && model.provider !== activeProvider) return false;
+      if (!needle) return true;
+      return `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(needle);
+    });
+  }, [query, state.models.catalog, activeProvider]);
+
+  const providers = state.models.catalog?.providers ?? [];
+  const grouped = useMemo(() => {
+    const map = new Map<string, ModelInfo[]>();
+    for (const model of models) {
+      const list = map.get(model.provider) ?? [];
+      list.push(model);
+      map.set(model.provider, list);
+    }
+    return [...map.entries()].map(([provider, items]) => ({ provider, items }));
+  }, [models]);
 
   return (
-    <div className="settings-stack">
+    <div className="model-panel">
       <header className="settings-head">
-        <h3>Models and tools</h3>
-        <p>Global switches apply to the next turn. A model toggle overrides what that model reported. Unknown vision and reasoning stay off until the provider says so, or you turn them on.</p>
+        <h3>Models & tools</h3>
+        <p>Global switches apply to the next turn. A model toggle overrides what the provider reported. Unknown vision and reasoning stay off until the provider says so.</p>
       </header>
 
-      <div className="toggle-grid">
-        <Toggle icon={Brain} label="Reasoning" detail="Composer brain icon. Off sends no thinking parameters." pressed={settings.reasoningEnabled} onClick={() => controller.setReasoningEnabled(!settings.reasoningEnabled)} />
-        <Toggle icon={AudioLines} label="Streaming" detail="Off waits for the full response, then shows it." pressed={settings.streamingEnabled} onClick={() => controller.setStreamingEnabled(!settings.streamingEnabled)} />
-        <Toggle icon={Eye} label="Vision" detail="Attach images only when the model can see them." pressed={settings.visionEnabled} onClick={() => controller.setVisionEnabled(!settings.visionEnabled)} />
-        <Toggle icon={Wrench} label="Tool calling" detail="Off hides every tool schema from the model." pressed={settings.toolsEnabled} onClick={() => controller.setToolsEnabled(!settings.toolsEnabled)} />
-      </div>
+      <section className="settings-section">
+        <h4>Global switches</h4>
+        <div className="toggle-grid">
+          <Toggle icon={Brain} label="Reasoning" detail="Composer brain icon. Off sends no thinking parameters." pressed={settings.reasoningEnabled} onClick={() => controller.setReasoningEnabled(!settings.reasoningEnabled)} />
+          <Toggle icon={AudioLines} label="Streaming" detail="Off waits for the full response, then shows it." pressed={settings.streamingEnabled} onClick={() => controller.setStreamingEnabled(!settings.streamingEnabled)} />
+          <Toggle icon={Eye} label="Vision" detail="Attach images only when the model can see them." pressed={settings.visionEnabled} onClick={() => controller.setVisionEnabled(!settings.visionEnabled)} />
+          <Toggle icon={Wrench} label="Tool calling" detail="Off hides every tool schema from the model." pressed={settings.toolsEnabled} onClick={() => controller.setToolsEnabled(!settings.toolsEnabled)} />
+        </div>
+      </section>
 
-      <div className="dialog-section">
-        <div className="section-label">Live catalog</div>
-        <div className="catalog-bar">
-          <input value={query} placeholder="Filter fetched models" aria-label="Filter models" onChange={(event) => setQuery(event.target.value)} />
+      <section className="settings-section">
+        <div className="section-head">
+          <h4>Live catalog</h4>
           <button type="button" className="btn" onClick={() => void controller.refreshModels()}>
             <RefreshCw size={14} aria-hidden />
             Fetch
           </button>
         </div>
-        {state.models.status === "error" ? <p className="meta">{state.models.error}</p> : null}
+        <div className="catalog-bar">
+          <div className="catalog-search">
+            <Search size={14} aria-hidden />
+            <input value={query} placeholder="Filter fetched models" aria-label="Filter models" onChange={(event) => setQuery(event.target.value)} />
+          </div>
+        </div>
+        {providers.length ? (
+          <div className="provider-chips" role="tablist" aria-label="Provider filter">
+            <button type="button" className="chip" role="tab" aria-pressed={activeProvider === "all"} onClick={() => setActiveProvider("all")}>
+              All <span className="chip-count">{state.models.catalog?.models.length ?? 0}</span>
+            </button>
+            {providers.map((provider) => {
+              const count = state.models.catalog?.models.filter((m) => m.provider === provider).length ?? 0;
+              return (
+                <button key={provider} type="button" className="chip" role="tab" aria-pressed={activeProvider === provider} onClick={() => setActiveProvider(provider)}>
+                  {provider} <span className="chip-count">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {state.models.status === "error" ? <p className="meta error">{state.models.error}</p> : null}
         {state.models.status === "loading" ? <p className="meta">Fetching models…</p> : null}
         {!models.length && state.models.status !== "loading" ? (
-          <p className="meta">No models yet. Connect a provider, or add an id below. Kiln will not invent one.</p>
+          <p className="meta">No models yet. Connect a provider above, or add an id below. Kiln does not invent one.</p>
         ) : null}
-        <div className="model-cap-list">
-          {models.slice(0, 40).map((model) => (
-            <ModelRow key={`${model.provider}:${model.accountId ?? ""}:${model.id}`} model={model} state={state} controller={controller} />
+        <div className="model-list">
+          {grouped.map((group) => (
+            <div key={group.provider} className="model-group">
+              <div className="model-group-head">
+                <strong>{group.provider}</strong>
+                <span className="meta">{group.items.length} model{group.items.length === 1 ? "" : "s"}</span>
+              </div>
+              <div className="model-rows">
+                {group.items.map((model) => (
+                  <ModelRow key={`${model.provider}:${model.accountId ?? ""}:${model.id}`} model={model} state={state} controller={controller} />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
-        {models.length > 40 ? <p className="meta">Showing 40 of {models.length}. Filter to narrow.</p> : null}
-      </div>
+      </section>
 
-      <div className="dialog-section">
-        <div className="section-label">Add a model by id</div>
-        <div className="provider-form">
+      <section className="settings-section">
+        <h4>Add a model by id</h4>
+        <p className="meta">Use this when a provider has no models endpoint, or you already know the id you want.</p>
+        <div className="custom-model-form">
           <label className="field">
             <span>Provider</span>
             <select value={providerId} onChange={(event) => setProviderId(event.target.value)}>
@@ -76,14 +125,16 @@ export function ModelToolsPanel({ state, controller }: { state: AppState; contro
               ))}
             </select>
           </label>
-          <label className="field">
-            <span>Model id</span>
-            <input value={modelId} placeholder="Exactly the id the provider expects" spellCheck={false} onChange={(event) => setModelId(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>Display name</span>
-            <input value={modelName} placeholder="Optional" onChange={(event) => setModelName(event.target.value)} />
-          </label>
+          <div className="twin">
+            <label className="field">
+              <span>Model id</span>
+              <input value={modelId} placeholder="Exactly the id the provider expects" spellCheck={false} onChange={(event) => setModelId(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Display name</span>
+              <input value={modelName} placeholder="Optional" onChange={(event) => setModelName(event.target.value)} />
+            </label>
+          </div>
           <div className="cap-row" role="group" aria-label="Model capabilities">
             {FLAGS.map((flag) => {
               const Icon = flag.icon;
@@ -95,7 +146,7 @@ export function ModelToolsPanel({ state, controller }: { state: AppState; contro
               );
             })}
           </div>
-          <div className="provider-actions">
+          <div className="form-actions">
             <button
               type="button"
               className="btn primary"
@@ -112,36 +163,41 @@ export function ModelToolsPanel({ state, controller }: { state: AppState; contro
           </div>
         </div>
         {settings.customModels.length ? (
-          <div className="model-cap-list">
+          <div className="custom-list">
             {settings.customModels.map((entry) => (
               <div key={`${entry.providerId}:${entry.id}`} className="account-row">
-                <div>
+                <div className="account-info">
                   <strong>{entry.name}</strong>
-                  <span className="meta">{entry.id}</span>
+                  <span className="meta">
+                    {entry.id}
+                    {Object.entries(entry).filter(([k]) => ["vision", "tools", "reasoning", "streaming"].includes(k)).map(([k, v]) => v ? ` · ${k}` : "").join("")}
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label={`Remove ${entry.id}`}
-                  onClick={() => {
-                    void confirmed(controller, {
-                      title: `Remove ${entry.name || entry.id}?`,
-                      message: "This model id is deleted from your list. The provider itself stays connected.",
-                      confirmLabel: "Remove",
-                      tone: "danger",
-                    }, () => controller.removeCustomModel(entry.providerId, entry.id));
-                  }}
-                >
-                  <Trash2 size={14} aria-hidden />
-                </button>
+                <div className="account-actions">
+                  <button
+                    type="button"
+                    className="icon-btn ghost"
+                    aria-label={`Remove ${entry.id}`}
+                    onClick={() => {
+                      void confirmed(controller, {
+                        title: `Remove ${entry.name || entry.id}?`,
+                        message: "This model id is deleted from your list. The provider itself stays connected.",
+                        confirmLabel: "Remove",
+                        tone: "danger",
+                      }, () => controller.removeCustomModel(entry.providerId, entry.id));
+                    }}
+                  >
+                    <Trash2 size={14} aria-hidden />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         ) : null}
-      </div>
+      </section>
 
-      <div className="dialog-section">
-        <div className="section-label">Generation</div>
+      <section className="settings-section">
+        <h4>Generation</h4>
         <div className="twin">
           <label className="field">
             <span>Temperature override</span>
@@ -156,7 +212,7 @@ export function ModelToolsPanel({ state, controller }: { state: AppState; contro
           <span>Max tool rounds per turn</span>
           <input type="number" min={1} max={48} value={settings.maxIterations} onChange={(event) => controller.updateSettings({ maxIterations: Number(event.target.value) || 24 })} />
         </label>
-      </div>
+      </section>
     </div>
   );
 }
@@ -165,10 +221,11 @@ function ModelRow({ model, state, controller }: { model: ModelInfo; state: AppSt
   const key = accountKey(model.accountId, model.id, model.provider);
   const custom = state.settings.customModels.some((item) => item.providerId === model.accountId && item.id === model.id);
   return (
-    <div className="model-cap">
-      <div className="model-cap-name">
+    <div className="model-row">
+      <div className="model-row-head">
         <strong>{model.name}</strong>
-        <span className="meta">{model.provider} · {model.id}{model.contextWindow ? ` · ${Math.round(model.contextWindow / 1000)}k` : ""}</span>
+        <span className="model-id">{model.id}</span>
+        {model.contextWindow ? <span className="meta">{Math.round(model.contextWindow / 1000)}k context</span> : null}
       </div>
       <div className="cap-row">
         {FLAGS.map((flag) => {
@@ -178,20 +235,20 @@ function ModelRow({ model, state, controller }: { model: ModelInfo; state: AppSt
             <button
               key={flag.key}
               type="button"
-              className="cap"
+              className={`cap ${on ? "on" : ""}`}
               aria-pressed={on}
               title={`${flag.label}: ${on ? "on" : "off"}. Click to override.`}
               onClick={() => controller.setModelOverride(key, { [flag.key]: !on })}
             >
               <Icon size={13} aria-hidden />
-              <span className="hide-sm">{flag.label}</span>
+              {flag.label}
             </button>
           );
         })}
         {custom && model.accountId ? (
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn ghost"
             aria-label={`Remove custom model ${model.id}`}
             onClick={() => {
               void confirmed(controller, {
