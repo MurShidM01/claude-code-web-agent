@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PROTOCOL_VERSION } from "../../src/lib/protocol/errors";
@@ -9,11 +10,13 @@ import { paramSchema, rpcRequest } from "../../src/lib/protocol/schema";
 import { assessCommand } from "../../src/lib/safety/commands";
 import { fileLooksSensitive } from "../../src/lib/safety/redact";
 import { hashContent, sliceLines } from "../../src/lib/tools/truncate";
-import { PathEscapeError, relativeToRoot, resolveInRoot, shouldSkipDir } from "../../src/lib/workspace/path";
+import { PathEscapeError, matchGlob, relativeToRoot, resolveInRoot, shouldSkipDir } from "../../src/lib/workspace/path";
 
 const MAX_BODY = 8_000_000;
 const MAX_OUTPUT = 1_000_000;
 const MAX_READ = 1_000_000;
+const MAX_SEARCH_FILE = 1_000_000;
+const MAX_PROCESSES = 32;
 
 interface BridgeOptions {
   host: string;
@@ -49,6 +52,7 @@ export async function startBridge(options: Partial<BridgeOptions> = {}): Promise
   const code = makeCode();
   let workspaceRoot: string | null = null;
   const processes = new Map<string, ProcessRecord>();
+  const sockets = new Set<Socket>();
 
   const server = createServer(async (req, res) => {
     try {
@@ -86,7 +90,8 @@ export async function startBridge(options: Partial<BridgeOptions> = {}): Promise
         const root = String(body.root ?? "");
         if (!root) throw new BridgeError("invalid_params", "root is required.");
         const resolved = path.resolve(root);
-        const st = await stat(resolved);
+        const st = await stat(resolved).catch(() => null);
+        if (!st) throw new BridgeError("not_found", `No such directory: ${root}`);
         if (!st.isDirectory()) throw new BridgeError("not_a_directory", "Workspace root must be a directory.");
         workspaceRoot = await realpath(resolved);
         sendJson(res, 200, info(workspaceRoot));
@@ -127,6 +132,11 @@ export async function startBridge(options: Partial<BridgeOptions> = {}): Promise
     }
   });
 
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port ?? 0, host, () => resolve());
@@ -149,10 +159,15 @@ export async function startBridge(options: Partial<BridgeOptions> = {}): Promise
     code,
     close: () =>
       new Promise((resolve) => {
+        // Stop spawned commands first so nothing outlives the bridge, then
+        // destroy open connections — server.close() alone waits on keep-alive
+        // and streaming sockets and would hang shutdown.
         for (const proc of processes.values()) {
-          if (proc.running) proc.child.kill("SIGTERM");
+          if (proc.running) killTree(proc.child);
         }
+        for (const socket of sockets) socket.destroy();
         server.close(() => resolve());
+        setTimeout(resolve, 1_000).unref();
       }),
   };
 }
@@ -288,7 +303,16 @@ async function writeWorkspaceFile(root: string, input: string, content: string) 
   } catch {
     created = true;
   }
-  await writeFile(target, content, "utf8");
+  // Atomic write: stage the content in a sibling temp file, then rename it
+  // over the target. A crash mid-write can never leave a half-written file.
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.kiln-${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    await writeFile(temp, content, "utf8");
+    await rename(temp, target);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return { path: relativeToRoot(root, target), created, bytes: Buffer.byteLength(content) };
 }
 
@@ -303,6 +327,8 @@ async function deleteWorkspacePath(root: string, input: string, recursive: boole
 async function renameWorkspacePath(root: string, from: string, to: string, overwrite: boolean) {
   const source = await jail(root, from);
   const dest = await jail(root, to);
+  const sourceStat = await stat(source).catch(() => null);
+  if (!sourceStat) throw new BridgeError("not_found", `No such path: ${from}`);
   if (!overwrite) {
     const exists = await stat(dest).then(() => true).catch(() => false);
     if (exists) throw new BridgeError("already_exists", "Destination exists. Pass overwrite only when replacement is intended.");
@@ -314,7 +340,8 @@ async function renameWorkspacePath(root: string, from: string, to: string, overw
 
 async function metadata(root: string, input: string) {
   const target = await jail(root, input);
-  const st = await stat(target);
+  const st = await stat(target).catch(() => null);
+  if (!st) throw new BridgeError("not_found", `No such path: ${input}`);
   return {
     path: relativeToRoot(root, target),
     name: path.basename(target),
@@ -328,7 +355,8 @@ async function metadata(root: string, input: string) {
 async function listTree(root: string, input: string, depth: number) {
   const { readdir } = await import("node:fs/promises");
   const target = await jail(root, input);
-  const st = await stat(target);
+  const st = await stat(target).catch(() => null);
+  if (!st) throw new BridgeError("not_found", `No such directory: ${input}`);
   if (!st.isDirectory()) throw new BridgeError("not_a_directory", "listDirectory requires a directory.");
   const walk = async (dir: string, levels: number): Promise<{ name: string; path: string; kind: "file" | "directory"; size?: number; children?: unknown[]; truncated?: boolean }> => {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -354,6 +382,9 @@ async function listTree(root: string, input: string, depth: number) {
 async function searchWorkspace(root: string, params: Record<string, unknown>) {
   const { readdir } = await import("node:fs/promises");
   const start = await jail(root, params.path ? String(params.path) : ".");
+  const startStat = await stat(start).catch(() => null);
+  if (!startStat) throw new BridgeError("not_found", `No such directory: ${params.path ?? "."}`);
+  if (!startStat.isDirectory()) throw new BridgeError("not_a_directory", "searchFiles requires a directory.");
   const max = Math.min(numberOr(params.maxResults) ?? 200, 500);
   const pattern = params.pattern ? String(params.pattern) : "";
   const glob = params.glob ? String(params.glob) : "";
@@ -382,9 +413,11 @@ async function searchWorkspace(root: string, params: Record<string, unknown>) {
       }
       if (!entry.isFile()) continue;
       const rel = relativeToRoot(root, full);
-      const { matchGlob } = await import("../../src/lib/workspace/path");
       if (pattern && !matchGlob(pattern, rel)) continue;
       if (glob && !matchGlob(glob, rel)) continue;
+      // Skip oversized files so a search over a huge tree stays responsive.
+      const fileStat = await stat(full).catch(() => null);
+      if (!fileStat || fileStat.size > MAX_SEARCH_FILE) continue;
       searched += 1;
       if (!regex) {
         if (pattern || glob) matches.push({ path: rel });
@@ -469,6 +502,10 @@ async function streamCommand(
     throw new BridgeError("forbidden", "This command is dangerous and was not explicitly acknowledged.");
   }
   const cwd = params.cwd ? await jail(root, params.cwd) : root;
+  const running = [...processes.values()].filter((proc) => proc.running).length;
+  if (running >= MAX_PROCESSES) {
+    throw new BridgeError("internal", `Too many running processes (limit ${MAX_PROCESSES}). Stop one with killProcess before starting another.`);
+  }
   const id = `proc_${randomBytes(4).toString("hex")}`;
   const child = spawn(params.command, {
     cwd,
@@ -586,7 +623,21 @@ function killProcess(processes: Map<string, ProcessRecord>, processId: string) {
 }
 
 function killTree(child: ChildProcess) {
-  if (child.pid && process.platform !== "win32") {
+  if (process.platform === "win32") {
+    // child.kill() only signals the shell wrapper on Windows; taskkill /T
+    // takes down the whole process tree (e.g. `npm run dev` and its children).
+    if (child.pid) {
+      try {
+        spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+        return;
+      } catch {
+        // Fall through to a direct kill.
+      }
+    }
+    child.kill();
+    return;
+  }
+  if (child.pid) {
     try {
       process.kill(-child.pid, "SIGTERM");
       return;
@@ -599,6 +650,34 @@ function killTree(child: ChildProcess) {
 
 function filteredEnv(): NodeJS.ProcessEnv {
   const allow = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TMP", "TEMP", "NODE_ENV", "CI", "EDITOR", "VISUAL", "PWD", "GIT_EDITOR", "GIT_PAGER", "PAGER"];
+  if (process.platform === "win32") {
+    // Without these, cmd.exe and common tools misbehave or fail to start:
+    // SystemRoot is required by the shell itself, PATHEXT/COMSPEC by command
+    // resolution, and the profile variables by git, node, and npm.
+    allow.push(
+      "SYSTEMROOT",
+      "SYSTEMDRIVE",
+      "WINDIR",
+      "COMSPEC",
+      "PATHEXT",
+      "USERPROFILE",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "PROGRAMFILES",
+      "PROGRAMFILES(X86)",
+      "PROGRAMDATA",
+      "ALLUSERSPROFILE",
+      "COMMONPROGRAMFILES",
+      "NUMBER_OF_PROCESSORS",
+      "PROCESSOR_ARCHITECTURE",
+      "PROCESSOR_IDENTIFIER",
+      "OS",
+      "HOMEDRIVE",
+      "HOMEPATH",
+      "PUBLIC",
+      "DRIVERDATA",
+    );
+  }
   const env = {} as NodeJS.ProcessEnv;
   for (const key of allow) {
     if (process.env[key]) env[key] = process.env[key];
@@ -705,6 +784,19 @@ if (invoked) {
     console.log("  workspace   not selected — confirm it in the browser");
     console.log("");
     console.log("The browser never receives unrestricted OS access. This process is the trust boundary.");
+
+    // Graceful shutdown: Ctrl+C or a supervisor signal must not orphan the
+    // commands the bridge started (dev servers, watchers, test runs).
+    let shuttingDown = false;
+    const shutdown = (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`\n${signal} received — stopping the bridge and the commands it started.`);
+      bridge.close().finally(() => process.exit(0));
+      setTimeout(() => process.exit(0), 3_000).unref();
+    };
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);

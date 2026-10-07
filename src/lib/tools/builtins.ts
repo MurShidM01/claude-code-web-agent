@@ -13,10 +13,11 @@ import {
   type ToolResult,
 } from "@/lib/tools/registry";
 import { hashContent, sliceLines, truncateMiddle } from "@/lib/tools/truncate";
+import { isNotFoundError } from "@/lib/workspace/errors";
 import { languageFromPath } from "@/lib/workspace/path";
 import type { WorkspacePort } from "@/lib/workspace/types";
 
-const READ_ONLY = ["Read", "LS", "Glob", "Grep", "GitStatus", "GitDiff", "GitLog", "WebFetch", "WebSearch", "TodoWrite", "Skill", "ReportFindings"];
+const READ_ONLY = ["Read", "LS", "Glob", "Grep", "Stat", "GitStatus", "GitDiff", "GitLog", "BashOutput", "WebFetch", "WebSearch", "TodoWrite", "Skill", "ReportFindings"];
 const PLAN_TOOLS = [...READ_ONLY, "AskUserQuestion"];
 
 export function createToolRegistry(): ToolRegistry {
@@ -171,6 +172,76 @@ function buildTools(): ToolDefinition[] {
         };
       });
     }),
+    def("MultiEdit", async (input, ctx) => {
+      const filePath = requiredString(input, "file_path");
+      const edits = parseEdits(input.edits);
+      return ctx.call(classifyTool("MultiEdit", input), async (ws) => {
+        const current = await ws.readFile(filePath);
+        if (current.binary) {
+          return { ok: false, isError: true, output: { code: "binary_file", message: "Cannot edit a binary file with MultiEdit." } };
+        }
+        const key = normalizeKey(filePath);
+        if (!ctx.readState.has(key)) {
+          return {
+            ok: false,
+            isError: true,
+            output: { code: "read_required", message: "Read the file before editing it." },
+          };
+        }
+        if (current.complete === false) {
+          return {
+            ok: false,
+            isError: true,
+            output: { code: "file_too_large", message: "This file is too large to edit safely in one pass. Read a smaller range and narrow the change." },
+          };
+        }
+        const currentHash = current.contentHash ?? hashContent(current.content);
+        if (ctx.readState.get(key) !== currentHash) return stale(filePath);
+        // Apply every edit in memory first. If any edit fails, nothing is written.
+        let next = current.content;
+        let replacements = 0;
+        for (let index = 0; index < edits.length; index += 1) {
+          const edit = edits[index]!;
+          const applied = applyReplacement(next, edit.oldString, edit.newString, edit.replaceAll);
+          if (!applied.ok) {
+            return {
+              ok: false,
+              isError: true,
+              output: {
+                code: "edit_failed",
+                message: `Edit ${index + 1} of ${edits.length} failed, so no changes were written: ${applied.message}`,
+              },
+            };
+          }
+          next = applied.content;
+          replacements += applied.count;
+        }
+        await ws.writeFile(filePath, next);
+        ctx.readState.set(key, hashContent(next));
+        const diff = buildDiff(filePath, current.content, next);
+        const sensitive = fileLooksSensitive(filePath) || /eval\(|dangerouslySetInnerHTML|pickle\.load|yaml\.load\(/.test(next);
+        return {
+          ok: true,
+          output: {
+            filePath,
+            edits: edits.length,
+            replacements,
+            reminder: sensitive
+              ? "Security note: the edited file matches a risky pattern (eval, unsanitized HTML, unsafe deserialization, or a secret-like path). Confirm the change is intentional and do not echo secrets."
+              : undefined,
+          },
+          diff: {
+            path: filePath,
+            additions: diff.additions,
+            deletions: diff.deletions,
+            patch: diff.patch,
+            created: false,
+            original: current.content,
+            next,
+          },
+        };
+      });
+    }),
     def("Delete", async (input, ctx) => {
       const target = requiredString(input, "path");
       const recursive = input.recursive === true;
@@ -238,6 +309,11 @@ function buildTools(): ToolDefinition[] {
         ws.listDirectory(stringish(input.path), numberish(input.depth) ?? 2),
       );
       return { ok: true, output: result, truncated: Boolean(result.truncated) };
+    }),
+    def("Stat", async (input, ctx) => {
+      const filePath = requiredString(input, "file_path");
+      const result = await ctx.call(classifyTool("Stat", input), (ws) => ws.getFileMetadata(filePath));
+      return { ok: true, output: result };
     }),
     def("Bash", async (input, ctx) => runShell("Bash", input, ctx)),
     def("GitStatus", async (input, ctx) => {
@@ -416,6 +492,27 @@ function buildTools(): ToolDefinition[] {
       const result = await ctx.call(classifyTool("TaskStop", input), (ws) => ws.killProcess(taskId));
       return { ok: true, output: { message: result.killed ? "Stopped." : "Process was not running.", task_id: taskId, task_type: "shell" } };
     }),
+    def("BashOutput", async (input, ctx) => {
+      const taskId = requiredString(input, "task_id");
+      const result = await ctx.call(classifyTool("BashOutput", input), (ws) => ws.getProcessStatus(taskId));
+      const stdoutRedacted = redactSecrets(result.stdout);
+      const stderrRedacted = redactSecrets(result.stderr);
+      const stdout = truncateMiddle(stdoutRedacted.text, ctx.outputLimit);
+      const stderr = truncateMiddle(stderrRedacted.text, Math.min(ctx.outputLimit, 20_000));
+      return {
+        ok: true,
+        output: {
+          task_id: taskId,
+          running: result.running,
+          exitCode: result.exitCode,
+          stdout: stdout.text,
+          stderr: stderr.text,
+          truncated: stdout.truncated || stderr.truncated,
+          redacted: stdoutRedacted.redacted + stderrRedacted.redacted || undefined,
+        },
+        truncated: stdout.truncated || stderr.truncated,
+      };
+    }),
   ];
 }
 
@@ -482,10 +579,9 @@ async function readIfExists(ws: WorkspacePort, filePath: string): Promise<{ exis
     if (current.binary) return { exists: true, content: null };
     return { exists: true, content: current.content, hash: hashContent(current.content) };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/not_found|ENOENT|no such file/i.test(message)) return { exists: false, content: null };
-    const code = typeof error === "object" && error && "code" in error ? String((error as { code: string }).code) : "";
-    if (code === "not_found") return { exists: false, content: null };
+    // Recognizes BridgeError("not_found"), Node ENOENT, and browser
+    // File System Access DOMExceptions alike — a missing file is never an error.
+    if (isNotFoundError(error)) return { exists: false, content: null };
     throw error;
   }
 }
@@ -511,6 +607,18 @@ function stringish(value: unknown): string | undefined {
 
 function numberish(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseEdits(value: unknown): { oldString: string; newString: string; replaceAll: boolean }[] {
+  if (!Array.isArray(value) || value.length === 0) throw new ToolInputError("edits must be a non-empty array.");
+  return value.map((item, index) => {
+    const record = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const oldString = record.old_string;
+    const newString = record.new_string;
+    if (typeof oldString !== "string" || !oldString) throw new ToolInputError(`edits[${index}].old_string is required and must be a non-empty string.`);
+    if (typeof newString !== "string") throw new ToolInputError(`edits[${index}].new_string is required and must be a string.`);
+    return { oldString, newString, replaceAll: record.replace_all === true };
+  });
 }
 
 function parseTodos(value: unknown): TodoItem[] {

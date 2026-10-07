@@ -77,6 +77,17 @@ The mode is stored per conversation and enforced in the tool layer immediately b
 
 A denial comes back to the model as a tool error with code `permission_denied`. The agent is instructed not to retry that action. Remembering an allow stores a session rule for that exact command or path. It does not survive a reload.
 
+## Tools
+
+The agent has a fixed tool set. File tools create parent directories, and every backend — bridge, folder picker, in-memory — reports the same typed errors (`not_found`, `path_escape`, `already_exists`, `forbidden`), so the model sees one vocabulary no matter how the project is connected.
+
+- Files: `Read`, `Write`, `Edit`, `MultiEdit` (several exact replacements in one atomic pass), `Delete`, `Move`, `Glob`, `Grep`, `LS`, `Stat`
+- Shell and git: `Bash` (foreground or background), `BashOutput`, `TaskStop`, `GitStatus`, `GitDiff`, `GitLog`
+- Planning and help: `TodoWrite`, `AskUserQuestion`, `Agent` (explore, plan, or general subagents), `Skill`, `ReportFindings`
+- Web: `WebFetch`, `WebSearch`
+
+Bridge writes are atomic: content is staged in a temp file and renamed over the target, so a crash mid-write cannot leave a half-written file. Stopping the bridge (Ctrl+C or a supervisor signal) also stops the commands it started. If the model repeats the exact same failing tool call three times in a row, the loop refuses it and ends the turn with an explanation instead of retrying forever.
+
 ## What gets stored
 
 Conversation titles, messages, and compact tool cards live in IndexedDB in this browser. Large command output and original file contents are trimmed before save. File contents are not sent to a model unless the agent reads them for the task. Environment variables are filtered by the bridge, and secret-like command output is redacted before the model sees it.

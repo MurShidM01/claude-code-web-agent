@@ -49,6 +49,27 @@ export const TOOL_SPECS: ModelToolSpec[] = [
     ["file_path", "old_string", "new_string"],
   ),
   tool(
+    "MultiEdit",
+    "Apply several exact text replacements to one file in a single atomic pass: the file is read once, every edit is applied in order, and it is written once. Use this instead of repeated Edit calls on the same file. You must Read the file first. If any edit does not match, nothing is written.",
+    {
+      file_path: str("Path to modify."),
+      edits: {
+        type: "array",
+        description: "Ordered edits to apply.",
+        items: {
+          type: "object",
+          properties: {
+            old_string: str("Exact text to replace."),
+            new_string: str("Replacement text. Must differ from old_string."),
+            replace_all: bool("Replace every occurrence of old_string. Default false."),
+          },
+          required: ["old_string", "new_string"],
+        },
+      },
+    },
+    ["file_path", "edits"],
+  ),
+  tool(
     "Delete",
     "Delete a file or, with recursive, a directory. This is destructive. Prefer Edit when you only need to change a file.",
     {
@@ -94,6 +115,12 @@ export const TOOL_SPECS: ModelToolSpec[] = [
       depth: num("How many levels to expand. Default 2, max 4."),
     },
     [],
+  ),
+  tool(
+    "Stat",
+    "Show metadata for a file or directory: kind, size, and last-modified time. Cheaper than Read when you only need to know whether a path exists or how large it is.",
+    { file_path: str("Path to inspect.") },
+    ["file_path"],
   ),
   tool(
     "Bash",
@@ -235,6 +262,12 @@ export const TOOL_SPECS: ModelToolSpec[] = [
   tool(
     "TaskStop",
     "Stop a background command started with Bash run_in_background.",
+    { task_id: str("Process id returned when the command was backgrounded.") },
+    ["task_id"],
+  ),
+  tool(
+    "BashOutput",
+    "Read the accumulated output and status of a background command started with Bash run_in_background. Use TaskStop to stop it.",
     { task_id: str("Process id returned when the command was backgrounded.") },
     ["task_id"],
   ),
