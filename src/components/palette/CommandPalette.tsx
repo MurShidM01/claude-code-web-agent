@@ -10,7 +10,16 @@ export function CommandPalette({ state, controller }: { state: AppState; control
   const items = useMemo(() => {
     const actions = [
       { id: "new", label: "New conversation", run: () => controller.newConversation() },
-      { id: "connect", label: "Connect workspace", run: () => controller.setConnectionOpen(true) },
+      { id: "connect", label: "Open project", detail: "Choose the folder the agent works in", run: () => controller.setConnectionOpen(true) },
+      ...(state.workspace.kind !== "none"
+        ? [{ id: "close-project", label: "Close project", detail: state.workspace.label ?? "", run: () => controller.closeWorkspace() }]
+        : []),
+      ...state.workspaces.map((workspace) => ({
+        id: `ws:${workspace.id}`,
+        label: workspace.label,
+        detail: `${workspace.kind === "fsa" ? "Folder" : "Bridge"} · ${workspace.root ?? ""}`,
+        run: () => void controller.openWorkspace(workspace.id),
+      })),
       { id: "settings", label: "Open settings", run: () => controller.setSettingsOpen(true) },
       { id: "sidebar", label: "Toggle sidebar", run: () => controller.toggleSidebar() },
       { id: "explorer", label: "Toggle file panel", run: () => controller.toggleExplorer() },
@@ -30,7 +39,7 @@ export function CommandPalette({ state, controller }: { state: AppState; control
     ];
     const needle = query.toLowerCase();
     return actions.filter((item) => `${item.label} ${"detail" in item ? item.detail : ""}`.toLowerCase().includes(needle));
-  }, [controller, query, state.catalog.commands, state.conversations]);
+  }, [controller, query, state.catalog.commands, state.conversations, state.workspaces, state.workspace.kind, state.workspace.label]);
 
   useEffect(() => setActive(0), [query, state.paletteOpen]);
   if (!state.paletteOpen) return null;

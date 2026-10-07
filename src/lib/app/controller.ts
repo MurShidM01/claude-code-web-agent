@@ -13,7 +13,7 @@ import { log, type LogEntry } from "@/lib/observability/log";
 import { addSessionRule } from "@/lib/permissions/engine";
 import type { SessionRule } from "@/lib/permissions/types";
 import type { PermissionMode } from "@/lib/permissions/types";
-import { createPersistence, type PersistedConversation, type Persistence } from "@/lib/persistence/db";
+import { createPersistence, type PersistedConversation, type PersistedWorkspace, type Persistence } from "@/lib/persistence/db";
 import { applyTheme, DEFAULT_SETTINGS, resolveTheme, type Settings, type ThemePreference } from "@/lib/persistence/settings";
 import { createToolRegistry, toolsForSubagent } from "@/lib/tools/builtins";
 import { BridgeClient, directTransport, proxiedTransport, type BridgeHealth } from "@/lib/workspace/bridge-client";
@@ -34,9 +34,18 @@ export interface ConversationState {
   modelMessages: ModelMessage[];
 }
 
+export interface RecentWorkspace {
+  id: string;
+  label: string;
+  root: string | null;
+  kind: "bridge" | "fsa";
+  updatedAt: number;
+}
+
 export interface AppState {
   booted: boolean;
   settings: Settings;
+  workspaces: RecentWorkspace[];
   sidebarOpen: boolean;
   explorerOpen: boolean;
   paletteOpen: boolean;
@@ -91,6 +100,7 @@ export class AppController {
     this.snapshot = {
       booted: false,
       settings: { ...DEFAULT_SETTINGS },
+      workspaces: [],
       sidebarOpen: true,
       explorerOpen: false,
       paletteOpen: false,
@@ -153,9 +163,16 @@ export class AppController {
     }
     const active = saved[0];
     const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 960px)").matches;
+    let workspaces: RecentWorkspace[] = [];
+    try {
+      workspaces = recents(await this.persistence.listWorkspaces());
+    } catch {
+      // A browser that blocks IndexedDB still gets an in-memory list.
+    }
     this.set({
       booted: true,
       settings,
+      workspaces,
       sidebarOpen: isMobile ? false : this.snapshot.sidebarOpen,
       conversations: summaries(this.conversations),
       activeId: active?.id ?? null,
@@ -382,6 +399,7 @@ export class AppController {
     if (this.pinnedBridge && this.bridgeClient) {
       const health = await this.bridgeClient.health();
       this.set({ bridge: { status: "connected", transport: "direct", health, error: undefined } });
+      this.adoptBridgeWorkspace(this.bridgeClient, health);
       return;
     }
     this.set({ bridge: { ...this.snapshot.bridge, status: "checking", error: undefined } });
@@ -390,6 +408,7 @@ export class AppController {
       const health = await client.health();
       this.bridgeClient = client;
       this.set({ bridge: { status: "connected", transport: "proxy", health, error: undefined } });
+      this.adoptBridgeWorkspace(client, health);
       return;
     } catch (error) {
       log.info("colocated bridge unavailable", { error: error instanceof Error ? error.message : "unavailable" });
@@ -439,6 +458,7 @@ export class AppController {
       this.bridgeClient = client;
       this.directToken = token;
       this.set({ bridge: { status: "connected", transport: "direct", health, error: undefined } });
+      this.adoptBridgeWorkspace(client, health);
       return true;
     } catch {
       return false;
@@ -462,13 +482,14 @@ export class AppController {
           capabilities: ["read", "write", "search", "shell", "git", "process"],
         },
         connectionOpen: false,
-        explorerOpen: true,
+        explorerOpen: wideScreen() ? true : this.snapshot.explorerOpen,
       });
       const active = this.active();
       if (active) {
         active.workspaceId = `bridge:${info.root}`;
         this.touch(active);
       }
+      await this.rememberWorkspace({ id: `bridge:${info.root}`, label: info.name, root: info.root, kind: "bridge" });
     } catch (error) {
       this.set({ notice: { title: "Could not open that workspace", message: error instanceof Error ? error.message : "The bridge rejected the path." } });
     }
@@ -501,13 +522,124 @@ export class AppController {
           kind: "fsa",
           capabilities: ["read", "write", "search"],
         },
-        explorerOpen: true,
+        explorerOpen: wideScreen() ? true : this.snapshot.explorerOpen,
       });
+      await this.rememberWorkspace({ id: `fsa:${handle.name}`, label: handle.name, root: handle.name, kind: "fsa" });
     } catch (error) {
       const name = error instanceof Error ? error.name : "";
       if (name === "AbortError") return;
       this.set({ notice: { title: "Could not open the folder", message: error instanceof Error ? error.message : "Folder selection failed." } });
     }
+  }
+
+  /**
+   * Re-open a project the user connected before. Bridge projects resolve by
+   * path; folder projects need the stored handle and a fresh permission grant.
+   */
+  async openWorkspace(id: string) {
+    const entry = this.snapshot.workspaces.find((item) => item.id === id);
+    if (!entry) {
+      this.set({ notice: { title: "That project is no longer listed", message: "Connect it again and it will come back to this list." } });
+      return;
+    }
+    if (entry.kind === "bridge") {
+      if (!entry.root) return;
+      await this.selectBridgeWorkspace(entry.root);
+      return;
+    }
+    const handle = await this.persistence.loadHandle(entry.label);
+    if (!handle) {
+      this.set({
+        notice: {
+          title: "This browser forgot the folder",
+          message: "The stored handle is gone. Use Open folder to grant access again — the browser does not keep folder access across browsers or profiles.",
+        },
+      });
+      return;
+    }
+    try {
+      const granted = handle.requestPermission ? await handle.requestPermission({ mode: "readwrite" }) : "granted";
+      if (granted !== "granted") {
+        this.set({ notice: { title: "Folder access was not granted", message: "Kiln cannot read or edit that folder without permission." } });
+        return;
+      }
+      this.fsa = new FileSystemAccessWorkspace(handle);
+      this.set({
+        workspace: {
+          id: `fsa:${handle.name}`,
+          label: handle.name,
+          root: handle.name,
+          kind: "fsa",
+          capabilities: ["read", "write", "search"],
+        },
+        connectionOpen: false,
+        explorerOpen: wideScreen() ? true : this.snapshot.explorerOpen,
+      });
+      await this.rememberWorkspace({ id: `fsa:${handle.name}`, label: handle.name, root: handle.name, kind: "fsa" });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      this.set({ notice: { title: "Could not reopen that folder", message: error instanceof Error ? error.message : "The browser refused the stored handle." } });
+    }
+  }
+
+  /** Drop the connected project. Chat keeps working; tools stop. */
+  closeWorkspace() {
+    this.fsa = null;
+    this.bridgeClient?.setInfo(null);
+    this.closePreview();
+    this.set({
+      workspace: { id: null, label: null, root: null, kind: "none", capabilities: [] },
+      explorerOpen: false,
+    });
+    const active = this.active();
+    if (active) {
+      active.workspaceId = null;
+      this.touch(active);
+      this.persistSoon(active);
+    }
+  }
+
+  private async rememberWorkspace(entry: { id: string; label: string; root: string | null; kind: "bridge" | "fsa" }) {
+    const conversation = this.active();
+    const record: PersistedWorkspace = {
+      id: entry.id,
+      label: entry.label,
+      root: entry.root,
+      kind: entry.kind,
+      permissionMode: conversation?.permissionMode ?? this.snapshot.settings.defaultPermissionMode,
+      modelId: conversation?.modelId ?? null,
+      provider: conversation?.provider ?? null,
+      updatedAt: Date.now(),
+    };
+    try {
+      await this.persistence.saveWorkspace(record);
+      this.set({ workspaces: recents(await this.persistence.listWorkspaces()) });
+    } catch {
+      this.set({
+        workspaces: recents([...this.snapshot.workspaces.map(toRecord), record].filter(uniqueById)),
+      });
+    }
+  }
+
+  /**
+   * A bridge that already has a project selected does not need a second click.
+   * Adopt it so the agent has somewhere to work the moment the page loads.
+   */
+  private adoptBridgeWorkspace(client: BridgeClient, health: BridgeHealth | null) {
+    const info = health?.workspace;
+    if (!info || this.snapshot.workspace.kind !== "none") return;
+    client.setInfo(info);
+    this.fsa = null;
+    this.set({
+      workspace: {
+        id: `bridge:${info.root}`,
+        label: info.name,
+        root: info.root,
+        kind: "bridge",
+        capabilities: ["read", "write", "search", "shell", "git", "process"],
+      },
+    });
+    void this.rememberWorkspace({ id: `bridge:${info.root}`, label: info.name, root: info.root, kind: "bridge" });
   }
 
   workspacePort(): WorkspacePort {
@@ -845,6 +977,40 @@ function summaries(conversations: Map<string, ConversationState>) {
   return [...conversations.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .map((conversation) => ({ id: conversation.id, title: conversation.title, updatedAt: conversation.updatedAt }));
+}
+
+function wideScreen(): boolean {
+  return typeof window === "undefined" || window.innerWidth >= 1100;
+}
+
+function toRecord(entry: RecentWorkspace): PersistedWorkspace {
+  return {
+    id: entry.id,
+    label: entry.label,
+    root: entry.root,
+    kind: entry.kind,
+    permissionMode: "ask",
+    modelId: null,
+    provider: null,
+    updatedAt: entry.updatedAt,
+  };
+}
+
+function uniqueById(entry: PersistedWorkspace, index: number, all: PersistedWorkspace[]) {
+  return all.findIndex((item) => item.id === entry.id) === index;
+}
+
+function recents(workspaces: PersistedWorkspace[]): RecentWorkspace[] {
+  return [...workspaces]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 8)
+    .map((workspace) => ({
+      id: workspace.id,
+      label: workspace.label,
+      root: workspace.root,
+      kind: workspace.kind === "fsa" ? "fsa" : "bridge",
+      updatedAt: workspace.updatedAt,
+    }));
 }
 
 function titleFrom(text: string): string {
