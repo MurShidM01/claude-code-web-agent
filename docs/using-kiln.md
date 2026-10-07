@@ -78,6 +78,10 @@ Settings → Providers. Tokens and keys stay in this browser. When the local bri
 
 The composer icons turn vision, tool calling, reasoning, and streaming on or off for the next turn. A model that did not report a capability stays off until you enable it on that model.
 
+Settings → Models & tools lists every fetched model under a provider heading, with a filter chip per provider and a count. A model arrives from exactly one account: Kiln never sends a Codex or Kiro model id to Puter, and it says so if the owning account has gone away. When a conversation has no model yet — or the model it remembered is gone from the catalog — the first live model is adopted automatically, so the next message works without a manual pick.
+
+If a turn produces no text, the transcript says why: an empty stream, reasoning without an answer, or the provider error that stopped it. The status pill in the topbar shows the current phase, and a live row appears in the thread while Kiln waits for the model.
+
 ## Permission modes
 
 The mode is stored per conversation and enforced in the tool layer immediately before the tool runs. The buttons are not the enforcement.
